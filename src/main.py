@@ -86,7 +86,7 @@ def run_news_clipper():
         logger.info("📰 Step 1: 뉴스 수집 중...")
         articles = collector.collect_all(
             keyword_combinations=keyword_combinations,
-            max_results_per_combo=10,  # API 한도 고려하여 조합당 10개로 제한
+            max_results_per_combo=20,  # 유료 플랜: 조합당 20개
             use_naver=bool(settings.naver_client_id),
             when="1d"
         )

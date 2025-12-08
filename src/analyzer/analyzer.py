@@ -22,27 +22,38 @@ class NewsAnalyzer:
         self,
         api_key: str,
         relevance_threshold: int = 60,
-        model: str = "gemini-2.0-flash"
+        model: str = "gemini-2.5-flash-lite",
+        is_paid_plan: bool = True
     ):
         """
         Args:
             api_key: Google AI API 키
             relevance_threshold: 관련성 임계값 (이 값 이상만 통과)
-            model: 사용할 Gemini 모델
+            model: 사용할 Gemini 모델 (gemini-1.5-pro 권장)
+            is_paid_plan: 유료 플랜 여부
         """
-        self.gemini = GeminiAnalyzer(api_key=api_key, model=model)
+        self.gemini = GeminiAnalyzer(
+            api_key=api_key, 
+            model=model,
+            is_paid_plan=is_paid_plan
+        )
         self.relevance_threshold = relevance_threshold
+        self.is_paid_plan = is_paid_plan
     
     def analyze_and_filter(
         self,
         articles: List[NewsArticle],
-        summarize: bool = True
+        summarize: bool = True,
+        use_batch: bool = True,
+        batch_size: int = 5
     ) -> Tuple[List[NewsArticle], List[NewsArticle]]:
         """뉴스 분석 및 필터링
         
         Args:
             articles: 수집된 뉴스 기사 리스트
             summarize: 요약 생성 여부
+            use_batch: 배치 분석 사용 여부 (유료 플랜 권장)
+            batch_size: 배치 크기
             
         Returns:
             (통과된 기사 리스트, 제외된 기사 리스트)
@@ -52,51 +63,66 @@ class NewsAnalyzer:
         
         logger.info(f"=== 뉴스 분석 시작: {len(articles)}건 ===")
         
-        for i, article in enumerate(articles):
-            logger.info(f"분석 중 ({i+1}/{len(articles)}): {article.title[:50]}...")
+        # 배치 분석 (유료 플랜에서 효율적)
+        if use_batch and self.is_paid_plan:
+            logger.info(f"배치 분석 모드 (배치 크기: {batch_size})")
+            filter_results = self.gemini.batch_analyze(articles, batch_size=batch_size)
             
-            # 1. 필터링 및 평가
-            filter_result = self.gemini.filter_news(
-                title=article.title,
-                description=article.description,
-                category=article.category
-            )
-            
-            # 결과 적용
-            article.relevance_score = filter_result.get("relevance_score", 0)
-            article.importance_score = filter_result.get("importance_score", 1)
-            
-            if filter_result.get("category"):
-                article.category = filter_result["category"]
-            
-            # 2. 임계값 확인
-            is_relevant = filter_result.get("is_relevant", False)
-            meets_threshold = article.relevance_score >= self.relevance_threshold
-            
-            if is_relevant and meets_threshold:
-                # 3. 요약 생성 (통과된 기사만)
-                if summarize:
-                    summary_result = self.gemini.summarize_news(
-                        title=article.title,
-                        content=article.description or article.content,
-                        category=article.category
-                    )
+            for i, (article, result) in enumerate(zip(articles, filter_results)):
+                if isinstance(result, dict):
+                    article.relevance_score = result.get("relevance_score", 0)
+                    article.importance_score = result.get("importance_score", 1)
+                    if result.get("category"):
+                        article.category = result["category"]
                     
-                    article.one_line_summary = summary_result.get("one_line_summary")
-                    article.detailed_summary = summary_result.get("detailed_summary")
-                    article.keywords = summary_result.get("keywords", [])
+                    is_relevant = result.get("is_relevant", False)
+                    meets_threshold = article.relevance_score >= self.relevance_threshold
+                    
+                    if is_relevant and meets_threshold:
+                        passed_articles.append(article)
+                    else:
+                        filtered_articles.append(article)
+                else:
+                    filtered_articles.append(article)
+        else:
+            # 개별 분석 (기존 방식)
+            for i, article in enumerate(articles):
+                logger.info(f"분석 중 ({i+1}/{len(articles)}): {article.title[:50]}...")
                 
-                passed_articles.append(article)
-                logger.debug(
-                    f"✅ 통과: {article.title[:30]}... "
-                    f"(관련성: {article.relevance_score}, 중요도: {article.importance_score})"
+                filter_result = self.gemini.filter_news(
+                    title=article.title,
+                    description=article.description,
+                    category=article.category
                 )
-            else:
-                filtered_articles.append(article)
-                logger.debug(
-                    f"❌ 제외: {article.title[:30]}... "
-                    f"(관련성: {article.relevance_score}, 이유: {filter_result.get('reason', 'N/A')})"
+                
+                article.relevance_score = filter_result.get("relevance_score", 0)
+                article.importance_score = filter_result.get("importance_score", 1)
+                
+                if filter_result.get("category"):
+                    article.category = filter_result["category"]
+                
+                is_relevant = filter_result.get("is_relevant", False)
+                meets_threshold = article.relevance_score >= self.relevance_threshold
+                
+                if is_relevant and meets_threshold:
+                    passed_articles.append(article)
+                else:
+                    filtered_articles.append(article)
+        
+        # 통과된 기사만 요약 생성
+        if summarize and passed_articles:
+            logger.info(f"요약 생성 중: {len(passed_articles)}건...")
+            for i, article in enumerate(passed_articles):
+                logger.info(f"요약 중 ({i+1}/{len(passed_articles)}): {article.title[:40]}...")
+                summary_result = self.gemini.summarize_news(
+                    title=article.title,
+                    content=article.description or article.content,
+                    category=article.category
                 )
+                
+                article.one_line_summary = summary_result.get("one_line_summary")
+                article.detailed_summary = summary_result.get("detailed_summary")
+                article.keywords = summary_result.get("keywords", [])
         
         logger.info(
             f"=== 분석 완료: 통과 {len(passed_articles)}건, "

@@ -15,22 +15,28 @@ class GeminiAnalyzer:
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.0-flash",
-        prompts_dir: Optional[Path] = None
+        model: str = "gemini-2.5-flash-lite",  # 빠르고 저렴한 모델
+        prompts_dir: Optional[Path] = None,
+        is_paid_plan: bool = True  # 유료 플랜 여부
     ):
         """
         Args:
             api_key: Google AI API 키
-            model: 사용할 모델명 (gemini-2.0-flash, gemini-1.5-pro 등)
+            model: 사용할 모델명 (gemini-1.5-pro 권장, gemini-2.0-flash도 가능)
             prompts_dir: 프롬프트 파일 디렉토리
+            is_paid_plan: 유료 플랜 여부 (True면 딜레이 없음)
         """
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model)
+        self.model_name = model
+        self.is_paid_plan = is_paid_plan
         self.prompts_dir = prompts_dir or Path(__file__).parent.parent.parent / "config" / "prompts"
         
         # 프롬프트 로드
         self.filter_prompt = self._load_prompt("filter_prompt.txt")
         self.summarize_prompt = self._load_prompt("summarize_prompt.txt")
+        
+        logger.info(f"Gemini 모델: {model}, 유료플랜: {is_paid_plan}")
     
     def _load_prompt(self, filename: str) -> str:
         """프롬프트 파일 로드"""
@@ -42,7 +48,7 @@ class GeminiAnalyzer:
         return ""
     
     def _call_api(self, system_prompt: str, user_message: str, retry_count: int = 3) -> str:
-        """Gemini API 호출 (Rate Limit 대응)
+        """Gemini API 호출
         
         Args:
             system_prompt: 시스템 프롬프트
@@ -60,18 +66,21 @@ class GeminiAnalyzer:
                 response = self.model.generate_content(
                     full_prompt,
                     generation_config=genai.types.GenerationConfig(
-                        temperature=0.3,
-                        max_output_tokens=1024,
+                        temperature=0.2,  # 더 일관된 결과를 위해 낮춤
+                        max_output_tokens=2048,  # 더 상세한 분석을 위해 증가
                     )
                 )
-                # Rate limit 방지를 위한 딜레이 (분당 15회 = 4초 간격)
-                time.sleep(4)
+                
+                # 무료 플랜만 딜레이 적용
+                if not self.is_paid_plan:
+                    time.sleep(4)
+                    
                 return response.text
                 
             except Exception as e:
                 error_str = str(e)
                 if "429" in error_str or "quota" in error_str.lower():
-                    wait_time = 30 * (attempt + 1)  # 30초, 60초, 90초
+                    wait_time = 10 * (attempt + 1)
                     logger.warning(f"Rate limit 도달. {wait_time}초 대기 후 재시도... ({attempt+1}/{retry_count})")
                     time.sleep(wait_time)
                 else:
@@ -79,6 +88,74 @@ class GeminiAnalyzer:
                     raise
         
         raise Exception("Gemini API 호출 최대 재시도 횟수 초과")
+    
+    def batch_analyze(self, articles: list, batch_size: int = 5) -> list:
+        """여러 뉴스를 배치로 분석 (효율성 + 품질 향상)
+        
+        Args:
+            articles: 뉴스 기사 리스트
+            batch_size: 한 번에 분석할 기사 수
+            
+        Returns:
+            분석 결과 리스트
+        """
+        results = []
+        
+        for i in range(0, len(articles), batch_size):
+            batch = articles[i:i+batch_size]
+            
+            # 배치 뉴스 목록 생성
+            news_list = "\n\n".join([
+                f"[뉴스 {j+1}]\n제목: {a.title if hasattr(a, 'title') else a.get('title', '')}\n"
+                f"내용: {(a.description if hasattr(a, 'description') else a.get('description', '')) or '(없음)'}\n"
+                f"카테고리 힌트: {(a.category if hasattr(a, 'category') else a.get('category', '')) or '일반'}"
+                for j, a in enumerate(batch)
+            ])
+            
+            batch_prompt = f"""다음 {len(batch)}개의 뉴스를 각각 평가해주세요.
+
+{news_list}
+
+## 요청
+각 뉴스에 대해 JSON 배열 형식으로 응답해주세요:
+[
+  {{"news_index": 1, "relevance_score": 0-100, "importance_score": 1-5, "category": "카테고리", "is_relevant": true/false, "reason": "이유"}},
+  ...
+]"""
+
+            try:
+                response = self._call_api(
+                    system_prompt=self.filter_prompt,
+                    user_message=batch_prompt
+                )
+                batch_results = self._parse_json_response(response)
+                
+                if isinstance(batch_results, list):
+                    results.extend(batch_results)
+                else:
+                    # 개별 분석으로 폴백
+                    for article in batch:
+                        result = self.filter_news(
+                            title=article.title if hasattr(article, 'title') else article.get('title', ''),
+                            description=article.description if hasattr(article, 'description') else article.get('description', ''),
+                            category=article.category if hasattr(article, 'category') else article.get('category')
+                        )
+                        results.append(result)
+                        
+            except Exception as e:
+                logger.error(f"배치 분석 실패: {e}")
+                # 개별 분석으로 폴백
+                for article in batch:
+                    result = self.filter_news(
+                        title=article.title if hasattr(article, 'title') else article.get('title', ''),
+                        description=article.description if hasattr(article, 'description') else article.get('description', ''),
+                        category=article.category if hasattr(article, 'category') else article.get('category')
+                    )
+                    results.append(result)
+            
+            logger.info(f"배치 분석 완료: {i+len(batch)}/{len(articles)}")
+        
+        return results
     
     def _parse_json_response(self, response: str) -> dict:
         """JSON 응답 파싱"""
