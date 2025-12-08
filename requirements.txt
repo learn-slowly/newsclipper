@@ -1,0 +1,30 @@
+# News Clipper - Dependencies
+# Python 3.10+
+
+# 뉴스 수집
+feedparser==6.0.11
+requests==2.31.0
+newspaper3k==0.2.8
+lxml==5.1.0
+lxml_html_clean==0.1.1
+
+# AI 분석
+google-generativeai==0.8.3
+
+# 노션 연동
+notion-client==2.2.1
+
+# 스케줄링
+apscheduler==3.10.4
+
+# 데이터 저장
+# sqlite3는 Python 내장
+
+# 유틸리티
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# 로깅
+loguru==0.7.2
+

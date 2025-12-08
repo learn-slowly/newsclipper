@@ -1,0 +1,164 @@
+{
+  "app": {
+    "name": "Political News Clipper",
+    "version": "1.0.0",
+    "description": "정의당 경남도당 뉴스 클리핑 자동화 서비스"
+  },
+  "keywords": {
+    "issues": [
+      "노동",
+      "산재",
+      "산업재해",
+      "노동자 사망",
+      "여성",
+      "성평등",
+      "성폭력",
+      "생태",
+      "환경",
+      "기후",
+      "기후위기",
+      "탄소중립",
+      "동물복지",
+      "동물학대",
+      "지방선거",
+      "2026 선거"
+    ],
+    "regions": [
+      "경남",
+      "경상남도",
+      "창원",
+      "김해",
+      "양산",
+      "진주",
+      "거제",
+      "통영",
+      "사천",
+      "밀양",
+      "함안",
+      "창녕",
+      "고성",
+      "남해",
+      "하동",
+      "산청",
+      "함양",
+      "거창",
+      "합천",
+      "의령"
+    ],
+    "general": [
+      "정의당",
+      "경남도당",
+      "진보정당"
+    ]
+  },
+  "keyword_combinations": [
+    {
+      "name": "정의당-경남",
+      "issues": ["정의당"],
+      "regions": ["경남", "경상남도", "경남도당"],
+      "category": "정당"
+    },
+    {
+      "name": "노동-경남",
+      "issues": ["노동", "산재", "산업재해", "노동자 사망"],
+      "regions": ["경남", "창원", "김해", "양산", "거제"],
+      "category": "노동"
+    },
+    {
+      "name": "환경-경남",
+      "issues": ["환경", "기후", "기후위기", "생태", "탄소중립"],
+      "regions": ["경남", "경상남도", "창원"],
+      "category": "환경"
+    },
+    {
+      "name": "여성-경남",
+      "issues": ["여성", "성평등", "성폭력"],
+      "regions": ["경남", "경상남도", "창원", "김해"],
+      "category": "여성"
+    },
+    {
+      "name": "동물복지-경남",
+      "issues": ["동물복지", "동물학대", "유기동물"],
+      "regions": ["경남", "경상남도"],
+      "category": "동물복지"
+    },
+    {
+      "name": "지방선거-경남",
+      "issues": ["지방선거", "2026 선거", "지방선거 후보"],
+      "regions": ["경남", "창원", "김해", "양산", "진주"],
+      "category": "선거"
+    }
+  ],
+  "news_sources": {
+    "priority_media": [
+      {
+        "name": "경남도민일보",
+        "domain": "idomin.com",
+        "trust_score": 5
+      },
+      {
+        "name": "경남신문",
+        "domain": "knnews.co.kr",
+        "trust_score": 5
+      },
+      {
+        "name": "KBS창원",
+        "domain": "changwon.kbs.co.kr",
+        "trust_score": 5
+      },
+      {
+        "name": "MBC경남",
+        "domain": "mbcgn.kr",
+        "trust_score": 5
+      }
+    ],
+    "national_media": [
+      {
+        "name": "한겨레",
+        "domain": "hani.co.kr",
+        "trust_score": 4
+      },
+      {
+        "name": "경향신문",
+        "domain": "khan.co.kr",
+        "trust_score": 4
+      },
+      {
+        "name": "오마이뉴스",
+        "domain": "ohmynews.com",
+        "trust_score": 4
+      }
+    ]
+  },
+  "filtering": {
+    "relevance_threshold": 60,
+    "importance_levels": {
+      "urgent": 5,
+      "important": 4,
+      "normal": 3,
+      "low": 2,
+      "minimal": 1
+    },
+    "exclude_keywords": [
+      "부동산",
+      "분양",
+      "아파트",
+      "광고",
+      "홍보",
+      "이벤트",
+      "할인",
+      "쇼핑"
+    ]
+  },
+  "schedule": {
+    "morning_run": "07:00",
+    "evening_run": "18:00",
+    "timezone": "Asia/Seoul"
+  },
+  "limits": {
+    "max_news_per_run": 100,
+    "max_news_per_category": 20,
+    "summary_max_length": 500
+  }
+}
+
