@@ -48,7 +48,7 @@ class NotionPublisher:
         "일반": "📰"
     }
     
-    # 지역 키워드 매핑
+    # 지역 키워드 매핑 (6개 주요 지역 + 경상남도)
     REGION_KEYWORDS = {
         "창원": ["창원", "마산", "진해", "창원시"],
         "김해": ["김해", "김해시"],
@@ -100,7 +100,7 @@ class NotionPublisher:
         return " ".join(f"#{kw}" for kw in keywords)
     
     def _extract_region(self, article) -> str:
-        """뉴스에서 지역 추출
+        """뉴스에서 지역 추출 (제목 기준)
         
         Args:
             article: 뉴스 기사
@@ -108,20 +108,21 @@ class NotionPublisher:
         Returns:
             지역명 (창원, 김해, 진주, 양산, 거제, 경상남도, 그외)
         """
-        # 제목과 내용에서 지역 키워드 검색
-        text = f"{article.title} {article.description or ''}"
+        # 제목에서만 지역 키워드 검색 (description은 부정확할 수 있음)
+        title = article.title or ""
         
-        # 우선순위: 시 단위 먼저 체크 (더 구체적인 지역)
-        for region, keywords in self.REGION_KEYWORDS.items():
-            if region == "경상남도":  # 경상남도는 나중에 체크
-                continue
+        # 우선순위 순서대로 체크 (시 단위 먼저, 경상남도는 마지막)
+        priority_order = ["김해", "진주", "양산", "거제", "창원"]
+        
+        for region in priority_order:
+            keywords = self.REGION_KEYWORDS.get(region, [])
             for keyword in keywords:
-                if keyword in text:
+                if keyword in title:
                     return region
         
-        # 경상남도 체크
+        # 경상남도 체크 (마지막) - "경남도", "경상남도", "도청" 등
         for keyword in self.REGION_KEYWORDS["경상남도"]:
-            if keyword in text:
+            if keyword in title:
                 return "경상남도"
         
         return "그외"
