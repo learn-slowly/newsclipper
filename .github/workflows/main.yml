@@ -1,0 +1,25 @@
+# .github/workflows/news-clipper.yml
+name: News Clipper
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 오전 10시 (KST = UTC+9)
+    - cron: '0 9 * * *'   # 오후 18시 (KST)
+  workflow_dispatch:       # 수동 실행 가능
+
+jobs:
+  clip-news:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python scripts/run_once.py
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
