@@ -170,11 +170,85 @@ class GeminiAnalyzer:
                 end = response.find("```", start)
                 response = response[start:end].strip()
             
+            # { 로 시작하는 JSON 찾기
+            if "{" in response:
+                start = response.find("{")
+                end = response.rfind("}") + 1
+                if end > start:
+                    response = response[start:end]
+            
             return json.loads(response)
         except json.JSONDecodeError as e:
             logger.error(f"JSON 파싱 실패: {e}")
-            logger.debug(f"원본 응답: {response}")
+            logger.debug(f"원본 응답: {response[:500]}...")
+            
+            # 마크다운 응답에서 정보 추출 시도
+            result = self._extract_insight_from_text(response)
+            if result:
+                return result
             return {}
+    
+    def _extract_insight_from_text(self, text: str) -> dict:
+        """마크다운 텍스트에서 인사이트 추출"""
+        try:
+            result = {
+                "headline": "",
+                "key_trends": [],
+                "political_implications": "",
+                "action_suggestions": [],
+                "risk_alerts": [],
+                "opportunities": ""
+            }
+            
+            lines = text.split("\n")
+            current_section = None
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 섹션 감지
+                if "핵심 메시지" in line or "headline" in line.lower():
+                    current_section = "headline"
+                elif "트렌드" in line or "trends" in line.lower():
+                    current_section = "trends"
+                elif "정치적 함의" in line or "implications" in line.lower():
+                    current_section = "implications"
+                elif "제안" in line or "suggestions" in line.lower() or "행동" in line:
+                    current_section = "suggestions"
+                elif "위험" in line or "주의" in line or "risk" in line.lower() or "alert" in line.lower():
+                    current_section = "risks"
+                elif "기회" in line or "opportunit" in line.lower():
+                    current_section = "opportunities"
+                elif line.startswith(("*", "-", "1.", "2.", "3.")):
+                    # 리스트 아이템 처리
+                    item = line.lstrip("*-0123456789. ").strip()
+                    if current_section == "trends" and item:
+                        result["key_trends"].append(item)
+                    elif current_section == "suggestions" and item:
+                        result["action_suggestions"].append(item)
+                    elif current_section == "risks" and item:
+                        result["risk_alerts"].append(item)
+                elif current_section == "headline" and not result["headline"]:
+                    result["headline"] = line
+                elif current_section == "implications":
+                    result["political_implications"] += line + " "
+                elif current_section == "opportunities":
+                    result["opportunities"] += line + " "
+            
+            # 결과 정리
+            result["political_implications"] = result["political_implications"].strip()
+            result["opportunities"] = result["opportunities"].strip()
+            
+            # 최소한의 내용이 있는지 확인
+            if result["headline"] or result["key_trends"]:
+                logger.info("마크다운 응답에서 인사이트 추출 성공")
+                return result
+            return None
+        except Exception as e:
+            logger.debug(f"텍스트에서 인사이트 추출 실패: {e}")
+            return None
     
     def filter_news(self, title: str, description: str, category: str = None) -> dict:
         """뉴스 필터링 및 관련성/중요도 평가
@@ -307,37 +381,33 @@ class GeminiAnalyzer:
         news_list = "\n".join(news_summaries)
         
         insight_prompt = f"""당신은 정의당 경남도당의 뉴스 분석가입니다.
-오늘 수집된 뉴스들을 분석하여 정치적 인사이트를 제공해주세요.
 
 ## 오늘의 뉴스 목록 ({len(articles)}건)
 {news_list}
 
-## 요청
-위 뉴스들을 종합적으로 분석하여 다음 JSON 형식으로 응답해주세요:
+## 중요: 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트나 설명 없이 JSON만 출력하세요.
 
-```json
 {{
-  "headline": "오늘의 핵심 메시지 (한 문장)",
+  "headline": "오늘의 핵심 메시지 (한 문장으로 작성)",
   "key_trends": [
-    "트렌드 1: 설명",
-    "트렌드 2: 설명",
-    "트렌드 3: 설명"
+    "트렌드 1: 구체적인 설명",
+    "트렌드 2: 구체적인 설명",
+    "트렌드 3: 구체적인 설명"
   ],
-  "political_implications": "정치적 함의 (2-3문장)",
+  "political_implications": "정치적 함의를 2-3문장으로 작성",
   "action_suggestions": [
-    "제안 1",
-    "제안 2",
-    "제안 3"
+    "구체적인 행동 제안 1",
+    "구체적인 행동 제안 2",
+    "구체적인 행동 제안 3"
   ],
   "risk_alerts": [
-    "주의사항 1",
-    "주의사항 2"
+    "주의해야 할 위험 요소 1",
+    "주의해야 할 위험 요소 2"
   ],
-  "opportunities": "기회 요인 (1-2문장)"
+  "opportunities": "기회 요인을 1-2문장으로 작성"
 }}
-```
 
-진보정당의 관점에서 경남 지역 정치에 유용한 인사이트를 제공해주세요."""
+위 JSON 형식을 정확히 따르세요. 마크다운이나 추가 설명 없이 순수 JSON만 출력하세요."""
 
         try:
             response = self._call_api(
