@@ -1,8 +1,10 @@
 """뉴스 분석 통합 모듈"""
 
+import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+from difflib import SequenceMatcher
 
 from loguru import logger
 
@@ -17,6 +19,14 @@ from analyzer.gemini_client import GeminiAnalyzer
 
 class NewsAnalyzer:
     """뉴스 분석 및 필터링 통합 클래스"""
+    
+    # 경남 지역 우선 언론사 (가산점 부여)
+    PRIORITY_MEDIA_DOMAINS = {
+        'idomin.com': 2,        # 경남도민일보: +2점
+        'knnews.co.kr': 2,      # 경남신문: +2점
+        'changwon.kbs.co.kr': 2, # KBS창원: +2점
+        'mbcgn.kr': 2,          # MBC경남: +2점
+    }
     
     def __init__(
         self,
@@ -39,6 +49,17 @@ class NewsAnalyzer:
         )
         self.relevance_threshold = relevance_threshold
         self.is_paid_plan = is_paid_plan
+    
+    def _get_media_bonus(self, url: str) -> int:
+        """언론사 가산점 계산"""
+        for domain, bonus in self.PRIORITY_MEDIA_DOMAINS.items():
+            if domain in url:
+                return bonus
+        return 0
+    
+    def _is_priority_media(self, url: str) -> bool:
+        """우선 언론사 여부 확인"""
+        return any(domain in url for domain in self.PRIORITY_MEDIA_DOMAINS.keys())
     
     def analyze_and_filter(
         self,
@@ -108,6 +129,17 @@ class NewsAnalyzer:
                     passed_articles.append(article)
                 else:
                     filtered_articles.append(article)
+        
+        # 경남 지역 언론사 가산점 적용
+        priority_count = 0
+        for article in passed_articles:
+            bonus = self._get_media_bonus(article.url)
+            if bonus > 0:
+                article.importance_score = min(5, (article.importance_score or 1) + bonus)
+                priority_count += 1
+        
+        if priority_count > 0:
+            logger.info(f"🏆 경남 지역 언론사 가산점 적용: {priority_count}건")
         
         # 통과된 기사만 요약 생성
         if summarize and passed_articles:
@@ -205,4 +237,92 @@ class NewsAnalyzer:
                 grouped["low"].append(article)
         
         return grouped
+    
+    def _normalize_title(self, title: str) -> str:
+        """제목 정규화 (비교를 위해)"""
+        # 언론사명 제거 (- 뒤의 내용)
+        title = re.sub(r'\s*[-–—]\s*[^-–—]+$', '', title)
+        # 특수문자 제거
+        title = re.sub(r'[^\w\s가-힣]', '', title)
+        # 공백 정규화
+        title = ' '.join(title.split())
+        return title.strip()
+    
+    def _calculate_similarity(self, title1: str, title2: str) -> float:
+        """두 제목의 유사도 계산 (0~1)"""
+        norm1 = self._normalize_title(title1)
+        norm2 = self._normalize_title(title2)
+        return SequenceMatcher(None, norm1, norm2).ratio()
+    
+    def deduplicate_similar_news(
+        self,
+        articles: List[NewsArticle],
+        similarity_threshold: float = 0.6
+    ) -> List[NewsArticle]:
+        """유사한 뉴스를 그룹화하여 중복 제거
+        
+        비슷한 뉴스는 대표 뉴스 하나에 관련 링크로 묶음
+        
+        Args:
+            articles: 뉴스 기사 리스트
+            similarity_threshold: 유사도 임계값 (0.6 = 60% 이상 유사하면 같은 뉴스로 판단)
+            
+        Returns:
+            중복 제거된 기사 리스트 (각 기사에 related_urls 속성 추가)
+        """
+        if not articles:
+            return []
+        
+        # 이미 그룹에 포함된 기사 인덱스
+        grouped_indices = set()
+        result = []
+        
+        for i, article in enumerate(articles):
+            if i in grouped_indices:
+                continue
+            
+            # 이 기사와 유사한 기사들 찾기
+            similar_articles = []
+            
+            for j, other in enumerate(articles):
+                if i == j or j in grouped_indices:
+                    continue
+                
+                similarity = self._calculate_similarity(article.title, other.title)
+                
+                if similarity >= similarity_threshold:
+                    similar_articles.append(other)
+                    grouped_indices.add(j)
+            
+            # 대표 기사 선정 (우선순위: 경남 지역 언론사 > 중요도 > 관련성 > 내용 길이)
+            all_similar = [article] + similar_articles
+            representative = max(
+                all_similar,
+                key=lambda x: (
+                    self._is_priority_media(x.url),  # 경남 지역 언론사 우선
+                    x.importance_score or 0,
+                    x.relevance_score or 0,
+                    len(x.description or '')
+                )
+            )
+            
+            # 관련 URL 목록 생성 (대표 기사 제외)
+            related_urls = []
+            for similar in all_similar:
+                if similar.url != representative.url:
+                    related_urls.append({
+                        'title': similar.title,
+                        'url': similar.url,
+                        'media': similar.media_name or '알 수 없음'
+                    })
+            
+            # 대표 기사에 관련 URL 추가
+            representative.related_urls = related_urls
+            
+            result.append(representative)
+            grouped_indices.add(i)
+        
+        logger.info(f"중복 제거: {len(articles)}건 → {len(result)}건 ({len(articles) - len(result)}건 그룹화)")
+        
+        return result
 

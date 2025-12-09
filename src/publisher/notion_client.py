@@ -232,6 +232,36 @@ class NotionPublisher:
             }
         })
         
+        # 관련 뉴스 링크 (중복 그룹화된 경우)
+        if hasattr(article, 'related_urls') and article.related_urls:
+            blocks.append({
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{"type": "text", "text": {"content": f"🔗 관련 기사 ({len(article.related_urls)}건)"}}]
+                }
+            })
+            
+            for related in article.related_urls:
+                # 언론사명과 함께 링크 표시
+                media = related.get('media', '알 수 없음')
+                blocks.append({
+                    "object": "block",
+                    "type": "bulleted_list_item",
+                    "bulleted_list_item": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": f"[{media}] "}},
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": related.get('title', '관련 기사')[:50],
+                                    "link": {"url": related.get('url', '')}
+                                }
+                            }
+                        ]
+                    }
+                })
+        
         return blocks
     
     def create_news_page(self, article: NewsArticle) -> Optional[str]:

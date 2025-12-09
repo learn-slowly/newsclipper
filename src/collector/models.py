@@ -30,6 +30,9 @@ class NewsArticle:
     one_line_summary: Optional[str] = None
     detailed_summary: Optional[dict] = None
     
+    # 관련 뉴스 (중복 그룹화용)
+    related_urls: List[dict] = field(default_factory=list)
+    
     # 메타 필드
     collected_at: datetime = field(default_factory=datetime.now)
     search_query: Optional[str] = None
@@ -58,6 +61,7 @@ class NewsArticle:
             "keywords": self.keywords,
             "one_line_summary": self.one_line_summary,
             "detailed_summary": self.detailed_summary,
+            "related_urls": self.related_urls,
             "collected_at": self.collected_at.isoformat(),
             "search_query": self.search_query
         }

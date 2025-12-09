@@ -7,6 +7,7 @@ from loguru import logger
 from .models import NewsArticle
 from .google_news import GoogleNewsCollector
 from .naver_news import NaverNewsCollector
+from .local_news import LocalNewsCollector
 
 
 class NewsCollector:
@@ -15,14 +16,21 @@ class NewsCollector:
     def __init__(
         self,
         naver_client_id: Optional[str] = None,
-        naver_client_secret: Optional[str] = None
+        naver_client_secret: Optional[str] = None,
+        use_local_rss: bool = True
     ):
         """
         Args:
             naver_client_id: 네이버 API 클라이언트 ID (선택)
             naver_client_secret: 네이버 API 클라이언트 시크릿 (선택)
+            use_local_rss: 경남 지역 언론사 RSS 직접 수집 여부
         """
         self.google_collector = GoogleNewsCollector()
+        
+        # 경남 지역 언론사 RSS 수집기
+        self.local_collector = LocalNewsCollector() if use_local_rss else None
+        if use_local_rss:
+            logger.info("경남 지역 언론사 RSS 수집기 활성화됨")
         
         self.naver_collector = None
         if naver_client_id and naver_client_secret:
@@ -68,7 +76,23 @@ class NewsCollector:
                 all_articles.append(article)
                 seen_urls.add(article.url)
         
-        # 2. 네이버 뉴스 수집 (선택)
+        # 2. 경남 지역 언론사 RSS 직접 수집 (우선!)
+        if self.local_collector:
+            # when 파라미터에서 시간 추출 (예: "16h" -> 16, "1d" -> 24)
+            hours = 24
+            if when.endswith('h'):
+                hours = int(when[:-1])
+            elif when.endswith('d'):
+                hours = int(when[:-1]) * 24
+            
+            local_articles = self.local_collector.collect_all(hours=hours)
+            
+            for article in local_articles:
+                if article.url not in seen_urls:
+                    all_articles.append(article)
+                    seen_urls.add(article.url)
+        
+        # 3. 네이버 뉴스 수집 (선택)
         if use_naver and self.naver_collector:
             logger.info("=== 네이버 뉴스 수집 시작 ===")
             naver_articles = self.naver_collector.collect_from_combinations(
