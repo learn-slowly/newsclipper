@@ -285,6 +285,90 @@ class GeminiAnalyzer:
                 "urgency_note": None
             }
     
+    def generate_daily_insight(self, articles: list) -> dict:
+        """오늘의 뉴스에 대한 인사이트 생성
+        
+        Args:
+            articles: 뉴스 기사 리스트
+            
+        Returns:
+            인사이트 딕셔너리
+        """
+        # 뉴스 요약 목록 생성
+        news_summaries = []
+        for i, article in enumerate(articles[:20]):  # 최대 20개만 분석
+            title = article.title if hasattr(article, 'title') else article.get('title', '')
+            category = article.category if hasattr(article, 'category') else article.get('category', '일반')
+            summary = article.one_line_summary if hasattr(article, 'one_line_summary') else article.get('one_line_summary', '')
+            importance = article.importance_score if hasattr(article, 'importance_score') else article.get('importance_score', 1)
+            
+            news_summaries.append(f"[{category}] (중요도:{importance}) {title}\n   요약: {summary or '(없음)'}")
+        
+        news_list = "\n".join(news_summaries)
+        
+        insight_prompt = f"""당신은 정의당 경남도당의 뉴스 분석가입니다.
+오늘 수집된 뉴스들을 분석하여 정치적 인사이트를 제공해주세요.
+
+## 오늘의 뉴스 목록 ({len(articles)}건)
+{news_list}
+
+## 요청
+위 뉴스들을 종합적으로 분석하여 다음 JSON 형식으로 응답해주세요:
+
+```json
+{{
+  "headline": "오늘의 핵심 메시지 (한 문장)",
+  "key_trends": [
+    "트렌드 1: 설명",
+    "트렌드 2: 설명",
+    "트렌드 3: 설명"
+  ],
+  "political_implications": "정치적 함의 (2-3문장)",
+  "action_suggestions": [
+    "제안 1",
+    "제안 2",
+    "제안 3"
+  ],
+  "risk_alerts": [
+    "주의사항 1",
+    "주의사항 2"
+  ],
+  "opportunities": "기회 요인 (1-2문장)"
+}}
+```
+
+진보정당의 관점에서 경남 지역 정치에 유용한 인사이트를 제공해주세요."""
+
+        try:
+            response = self._call_api(
+                system_prompt="당신은 진보정당의 정치 분석가입니다. 뉴스를 종합 분석하여 정치적 인사이트를 제공합니다.",
+                user_message=insight_prompt
+            )
+            result = self._parse_json_response(response)
+            
+            if not result:
+                result = {
+                    "headline": "오늘의 뉴스 분석",
+                    "key_trends": ["분석 결과를 생성하지 못했습니다."],
+                    "political_implications": "",
+                    "action_suggestions": [],
+                    "risk_alerts": [],
+                    "opportunities": ""
+                }
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"인사이트 생성 실패: {e}")
+            return {
+                "headline": "오늘의 뉴스 분석",
+                "key_trends": [f"분석 중 오류 발생: {str(e)}"],
+                "political_implications": "",
+                "action_suggestions": [],
+                "risk_alerts": [],
+                "opportunities": ""
+            }
+    
     def batch_filter(self, articles: list) -> list:
         """여러 뉴스 일괄 필터링
         

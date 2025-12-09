@@ -267,7 +267,8 @@ class NotionPublisher:
         self,
         target_date: date,
         articles: List[NewsArticle],
-        parent_page_id: Optional[str] = None
+        parent_page_id: Optional[str] = None,
+        insight: Optional[dict] = None
     ) -> Optional[str]:
         """일일 요약 페이지 생성
         
@@ -275,6 +276,7 @@ class NotionPublisher:
             target_date: 대상 날짜
             articles: 뉴스 기사 리스트
             parent_page_id: 부모 페이지 ID (선택)
+            insight: AI가 생성한 인사이트 딕셔너리 (선택)
             
         Returns:
             생성된 페이지 ID
@@ -312,6 +314,119 @@ class NotionPublisher:
                 },
                 {"object": "block", "type": "divider", "divider": {}}
             ]
+            
+            # 오늘의 인사이트 섹션 (AI 생성)
+            if insight:
+                blocks.append({
+                    "object": "block",
+                    "type": "heading_2",
+                    "heading_2": {
+                        "rich_text": [{"type": "text", "text": {"content": "💡 오늘의 인사이트"}}]
+                    }
+                })
+                
+                # 헤드라인
+                if insight.get("headline"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [{"type": "text", "text": {"content": insight["headline"]}, "annotations": {"bold": True}}],
+                            "icon": {"type": "emoji", "emoji": "🎯"},
+                            "color": "yellow_background"
+                        }
+                    })
+                
+                # 주요 트렌드
+                if insight.get("key_trends"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{"type": "text", "text": {"content": "📈 주요 트렌드"}}]
+                        }
+                    })
+                    for trend in insight["key_trends"]:
+                        blocks.append({
+                            "object": "block",
+                            "type": "bulleted_list_item",
+                            "bulleted_list_item": {
+                                "rich_text": [{"type": "text", "text": {"content": trend}}]
+                            }
+                        })
+                
+                # 정치적 함의
+                if insight.get("political_implications"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{"type": "text", "text": {"content": "🏛️ 정치적 함의"}}]
+                        }
+                    })
+                    blocks.append({
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{"type": "text", "text": {"content": insight["political_implications"]}}]
+                        }
+                    })
+                
+                # 대응 제안
+                if insight.get("action_suggestions"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{"type": "text", "text": {"content": "✅ 대응 제안"}}]
+                        }
+                    })
+                    for suggestion in insight["action_suggestions"]:
+                        blocks.append({
+                            "object": "block",
+                            "type": "to_do",
+                            "to_do": {
+                                "rich_text": [{"type": "text", "text": {"content": suggestion}}],
+                                "checked": False
+                            }
+                        })
+                
+                # 주의사항
+                if insight.get("risk_alerts"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{"type": "text", "text": {"content": "⚠️ 주의사항"}}]
+                        }
+                    })
+                    for alert in insight["risk_alerts"]:
+                        blocks.append({
+                            "object": "block",
+                            "type": "bulleted_list_item",
+                            "bulleted_list_item": {
+                                "rich_text": [{"type": "text", "text": {"content": alert}}]
+                            }
+                        })
+                
+                # 기회 요인
+                if insight.get("opportunities"):
+                    blocks.append({
+                        "object": "block",
+                        "type": "heading_3",
+                        "heading_3": {
+                            "rich_text": [{"type": "text", "text": {"content": "🌟 기회 요인"}}]
+                        }
+                    })
+                    blocks.append({
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{"type": "text", "text": {"content": insight["opportunities"]}}]
+                        }
+                    })
+                
+                blocks.append({"object": "block", "type": "divider", "divider": {}})
             
             # 중요도별 섹션
             importance_groups = {
@@ -393,13 +508,15 @@ class NotionPublisher:
     def publish_articles(
         self,
         articles: List[NewsArticle],
-        create_summary: bool = True
+        create_summary: bool = True,
+        insight: Optional[dict] = None
     ) -> dict:
         """여러 뉴스 기사 발행
         
         Args:
             articles: 뉴스 기사 리스트
             create_summary: 일일 요약 페이지 생성 여부
+            insight: AI가 생성한 인사이트 딕셔너리 (선택)
             
         Returns:
             발행 결과 딕셔너리
@@ -424,7 +541,8 @@ class NotionPublisher:
         if create_summary and articles:
             summary_page_id = self.create_daily_summary_page(
                 target_date=date.today(),
-                articles=articles
+                articles=articles,
+                insight=insight
             )
             results["summary_page_id"] = summary_page_id
         

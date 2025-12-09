@@ -39,15 +39,17 @@ def run_scheduler():
     logger.info("=" * 60)
     
     # 스케줄 시간 파싱
-    morning_time = schedule_config.get("morning_run", "07:00")
+    morning_time = schedule_config.get("morning_run", "10:00")
+    morning_hours = schedule_config.get("morning_hours", 16)
     evening_time = schedule_config.get("evening_run", "18:00")
+    evening_hours = schedule_config.get("evening_hours", 8)
     timezone = schedule_config.get("timezone", "Asia/Seoul")
     
     morning_hour, morning_minute = map(int, morning_time.split(":"))
     evening_hour, evening_minute = map(int, evening_time.split(":"))
     
-    logger.info(f"⏰ 오전 실행: {morning_time}")
-    logger.info(f"⏰ 오후 실행: {evening_time}")
+    logger.info(f"⏰ 오전 실행: {morning_time} (최근 {morning_hours}시간 뉴스)")
+    logger.info(f"⏰ 오후 실행: {evening_time} (최근 {evening_hours}시간 뉴스)")
     logger.info(f"🌍 시간대: {timezone}")
     
     # 스케줄러 생성

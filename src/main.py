@@ -83,12 +83,25 @@ def run_news_clipper():
     
     try:
         # 1. 뉴스 수집
-        logger.info("📰 Step 1: 뉴스 수집 중...")
+        # 시간대에 따른 수집 기간 설정
+        config = settings.load_config()
+        schedule_config = config.get("schedule", {})
+        current_hour = datetime.now().hour
+        
+        # 오전 10시 실행: 16시간, 오후 18시 실행: 8시간
+        if current_hour < 14:  # 오전~오후 2시 이전
+            hours = schedule_config.get("morning_hours", 16)
+        else:  # 오후 2시 이후
+            hours = schedule_config.get("evening_hours", 8)
+        
+        when = f"{hours}h"
+        logger.info(f"📰 Step 1: 뉴스 수집 중... (최근 {hours}시간)")
+        
         articles = collector.collect_all(
             keyword_combinations=keyword_combinations,
             max_results_per_combo=20,  # 유료 플랜: 조합당 20개
             use_naver=bool(settings.naver_client_id),
-            when="1d"
+            when=when
         )
         
         if not articles:
@@ -96,6 +109,29 @@ def run_news_clipper():
             return
         
         logger.info(f"📥 수집 완료: {len(articles)}건")
+        
+        # 1.5. 언론사 필터링
+        logger.info("📰 Step 1.5: 언론사 필터링 중...")
+        news_sources = config.get("news_sources", {})
+        allowed_domains = []
+        
+        # priority_media와 national_media에서 도메인 추출
+        for media in news_sources.get("priority_media", []):
+            allowed_domains.append(media.get("domain", ""))
+        for media in news_sources.get("national_media", []):
+            allowed_domains.append(media.get("domain", ""))
+        
+        if allowed_domains:
+            original_count = len(articles)
+            articles = [
+                article for article in articles
+                if any(domain in (article.url or "") for domain in allowed_domains)
+            ]
+            logger.info(f"🏢 언론사 필터링: {original_count}건 → {len(articles)}건")
+        
+        if not articles:
+            logger.warning("지정된 언론사의 뉴스가 없습니다")
+            return
         
         # 2. 중복 제거
         logger.info("🔄 Step 2: 중복 제거 중...")
@@ -125,11 +161,22 @@ def run_news_clipper():
         
         logger.info(f"✅ 분석 완료: 관련 뉴스 {len(passed_articles)}건")
         
+        # 3.5. 인사이트 생성
+        logger.info("💡 Step 3.5: 인사이트 생성 중...")
+        from analyzer.gemini_client import GeminiAnalyzer
+        gemini = GeminiAnalyzer(
+            api_key=settings.google_api_key,
+            is_paid_plan=True
+        )
+        insight = gemini.generate_daily_insight(passed_articles)
+        logger.info(f"💡 인사이트 생성 완료: {insight.get('headline', '')[:50]}...")
+        
         # 4. 노션 발행
         logger.info("📤 Step 4: 노션 발행 중...")
         results = publisher.publish_articles(
             articles=passed_articles,
-            create_summary=True
+            create_summary=True,
+            insight=insight
         )
         
         logger.info(f"📝 발행 완료: 성공 {len(results['success'])}건")
