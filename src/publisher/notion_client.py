@@ -48,6 +48,16 @@ class NotionPublisher:
         "일반": "📰"
     }
     
+    # 지역 키워드 매핑
+    REGION_KEYWORDS = {
+        "창원": ["창원", "마산", "진해", "창원시"],
+        "김해": ["김해", "김해시"],
+        "진주": ["진주", "진주시"],
+        "양산": ["양산", "양산시"],
+        "거제": ["거제", "거제시"],
+        "경상남도": ["경남", "경상남도", "도청", "경남도"]
+    }
+    
     def __init__(self, api_key: str, database_id: str):
         """
         Args:
@@ -88,6 +98,33 @@ class NotionPublisher:
     def _format_keywords(self, keywords: List[str]) -> str:
         """키워드를 해시태그 형식으로 포맷"""
         return " ".join(f"#{kw}" for kw in keywords)
+    
+    def _extract_region(self, article) -> str:
+        """뉴스에서 지역 추출
+        
+        Args:
+            article: 뉴스 기사
+            
+        Returns:
+            지역명 (창원, 김해, 진주, 양산, 거제, 경상남도, 그외)
+        """
+        # 제목과 내용에서 지역 키워드 검색
+        text = f"{article.title} {article.description or ''}"
+        
+        # 우선순위: 시 단위 먼저 체크 (더 구체적인 지역)
+        for region, keywords in self.REGION_KEYWORDS.items():
+            if region == "경상남도":  # 경상남도는 나중에 체크
+                continue
+            for keyword in keywords:
+                if keyword in text:
+                    return region
+        
+        # 경상남도 체크
+        for keyword in self.REGION_KEYWORDS["경상남도"]:
+            if keyword in text:
+                return "경상남도"
+        
+        return "그외"
     
     def _build_summary_blocks(self, article: NewsArticle) -> List[dict]:
         """뉴스 요약을 노션 블록으로 변환"""
@@ -210,6 +247,9 @@ class NotionPublisher:
             category = article.category or "일반"
             emoji = self.CATEGORY_EMOJI.get(category, "📰")
             
+            # 지역 추출
+            region = self._extract_region(article)
+            
             # 페이지 속성
             properties = {
                 "제목": {
@@ -217,6 +257,9 @@ class NotionPublisher:
                 },
                 "카테고리": {
                     "select": {"name": category}
+                },
+                "지역": {
+                    "select": {"name": region}
                 },
                 "중요도": {
                     "number": article.importance_score or 1
