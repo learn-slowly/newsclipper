@@ -173,10 +173,15 @@ def run_news_clipper():
         
         # 4. 노션 발행
         logger.info("📤 Step 4: 노션 발행 중...")
+        
+        # 오전/오후 구분 (14시 기준)
+        period = "오전" if current_hour < 14 else "오후"
+        
         results = publisher.publish_articles(
             articles=passed_articles,
             create_summary=True,
-            insight=insight
+            insight=insight,
+            period=period
         )
         
         logger.info(f"📝 발행 완료: 성공 {len(results['success'])}건")

@@ -342,7 +342,8 @@ class NotionPublisher:
         target_date: date,
         articles: List[NewsArticle],
         parent_page_id: Optional[str] = None,
-        insight: Optional[dict] = None
+        insight: Optional[dict] = None,
+        period: Optional[str] = None
     ) -> Optional[str]:
         """일일 요약 페이지 생성
         
@@ -351,12 +352,14 @@ class NotionPublisher:
             articles: 뉴스 기사 리스트
             parent_page_id: 부모 페이지 ID (선택)
             insight: AI가 생성한 인사이트 딕셔너리 (선택)
+            period: 기간 구분 ("오전", "오후" 또는 None)
             
         Returns:
             생성된 페이지 ID
         """
         try:
             date_str = target_date.strftime("%Y-%m-%d")
+            period_str = f" {period}" if period else ""
             
             # 통계 계산
             total_count = len(articles)
@@ -560,19 +563,22 @@ class NotionPublisher:
             else:
                 parent = {"type": "data_source_id", "data_source_id": self.data_source_id}
             
+            # 제목에 오전/오후 구분 추가
+            title = f"📰 {date_str}{period_str} 뉴스 클리핑"
+            
             response = self.client.pages.create(
                 parent=parent,
                 icon={"type": "emoji", "emoji": "📰"},
                 properties={
                     "제목": {
-                        "title": [{"text": {"content": f"📰 {date_str} 일일 뉴스 클리핑"}}]
+                        "title": [{"text": {"content": title}}]
                     }
                 },
                 children=blocks
             )
             
             page_id = response["id"]
-            logger.info(f"일일 요약 페이지 생성 완료: {date_str}")
+            logger.info(f"일일 요약 페이지 생성 완료: {date_str}{period_str}")
             return page_id
             
         except Exception as e:
@@ -583,7 +589,8 @@ class NotionPublisher:
         self,
         articles: List[NewsArticle],
         create_summary: bool = True,
-        insight: Optional[dict] = None
+        insight: Optional[dict] = None,
+        period: Optional[str] = None
     ) -> dict:
         """여러 뉴스 기사 발행
         
@@ -591,6 +598,7 @@ class NotionPublisher:
             articles: 뉴스 기사 리스트
             create_summary: 일일 요약 페이지 생성 여부
             insight: AI가 생성한 인사이트 딕셔너리 (선택)
+            period: 기간 구분 ("오전", "오후" 또는 None)
             
         Returns:
             발행 결과 딕셔너리
@@ -616,7 +624,8 @@ class NotionPublisher:
             summary_page_id = self.create_daily_summary_page(
                 target_date=date.today(),
                 articles=articles,
-                insight=insight
+                insight=insight,
+                period=period
             )
             results["summary_page_id"] = summary_page_id
         
