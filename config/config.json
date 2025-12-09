@@ -4,6 +4,10 @@
     "version": "1.0.0",
     "description": "정의당 경남도당 뉴스 클리핑 자동화 서비스"
   },
+  "notion": {
+    "parent_page_id": "",
+    "use_monthly_db": true
+  },
   "keywords": {
     "issues": [
       "노동",

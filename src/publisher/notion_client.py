@@ -3,12 +3,13 @@
 Notion API 2025-09-03 버전 대응
 - data_source_id 사용 필요
 - https://developers.notion.com/docs/upgrade-guide-2025-09-03
+- 월별 데이터베이스 자동 생성 기능
 """
 
 import sys
 from pathlib import Path
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from notion_client import Client
 from loguru import logger
@@ -58,38 +59,183 @@ class NotionPublisher:
         "경상남도": ["경남", "경상남도", "도청", "경남도"]
     }
     
-    def __init__(self, api_key: str, database_id: str):
+    def __init__(self, api_key: str, database_id: str = None, parent_page_id: str = None):
         """
         Args:
             api_key: 노션 Integration 토큰
-            database_id: 노션 데이터베이스 ID
+            database_id: 노션 데이터베이스 ID (기존 DB 사용시)
+            parent_page_id: 월별 DB를 생성할 상위 페이지 ID (자동 생성시)
         """
         # 2025-09-03 버전 사용
         self.client = Client(auth=api_key, notion_version="2025-09-03")
+        self.parent_page_id = parent_page_id
         self.database_id = database_id
         self.data_source_id = None
+        self._monthly_db_cache: Dict[str, str] = {}  # 월별 DB ID 캐시
         
-        # data_source_id 가져오기
-        self._fetch_data_source_id()
+        # 기존 database_id가 있으면 data_source_id 가져오기
+        if database_id:
+            self._fetch_data_source_id()
     
-    def _fetch_data_source_id(self):
+    def _fetch_data_source_id(self, db_id: str = None):
         """데이터베이스에서 data_source_id 가져오기 (2025-09-03 API 필수)"""
+        target_db_id = db_id or self.database_id
         try:
-            response = self.client.databases.retrieve(database_id=self.database_id)
+            response = self.client.databases.retrieve(database_id=target_db_id)
             data_sources = response.get("data_sources", [])
             
             if data_sources:
-                self.data_source_id = data_sources[0]["id"]
-                logger.info(f"data_source_id 획득: {self.data_source_id[:8]}...")
+                data_source_id = data_sources[0]["id"]
+                logger.info(f"data_source_id 획득: {data_source_id[:8]}...")
+                if not db_id:  # 기본 DB인 경우 저장
+                    self.data_source_id = data_source_id
+                return data_source_id
             else:
                 # 이전 버전 API 또는 단일 소스 DB의 경우
                 logger.warning("data_sources가 없습니다. database_id를 사용합니다.")
-                self.data_source_id = self.database_id
+                if not db_id:
+                    self.data_source_id = target_db_id
+                return target_db_id
                 
         except Exception as e:
             logger.error(f"data_source_id 획득 실패: {e}")
             # fallback으로 database_id 사용
-            self.data_source_id = self.database_id
+            if not db_id:
+                self.data_source_id = target_db_id
+            return target_db_id
+    
+    def _get_monthly_db_name(self, target_date: date) -> str:
+        """월별 DB 이름 생성"""
+        return f"📰 {target_date.strftime('%Y-%m')} 뉴스클리핑"
+    
+    def _find_monthly_database(self, target_date: date) -> Optional[str]:
+        """기존 월별 데이터베이스 찾기"""
+        month_key = target_date.strftime('%Y-%m')
+        
+        # 캐시 확인
+        if month_key in self._monthly_db_cache:
+            return self._monthly_db_cache[month_key]
+        
+        if not self.parent_page_id:
+            return None
+        
+        try:
+            # 상위 페이지의 자식 블록 조회
+            db_name = self._get_monthly_db_name(target_date)
+            
+            # 페이지 내 자식 블록 검색
+            children = self.client.blocks.children.list(block_id=self.parent_page_id)
+            
+            for block in children.get("results", []):
+                if block.get("type") == "child_database":
+                    # 데이터베이스 정보 조회
+                    db_id = block["id"]
+                    db_info = self.client.databases.retrieve(database_id=db_id)
+                    title_parts = db_info.get("title", [])
+                    if title_parts:
+                        title = "".join([t.get("plain_text", "") for t in title_parts])
+                        if month_key in title:
+                            logger.info(f"기존 월별 DB 발견: {title}")
+                            self._monthly_db_cache[month_key] = db_id
+                            return db_id
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"월별 DB 검색 실패: {e}")
+            return None
+    
+    def _create_monthly_database(self, target_date: date) -> Optional[str]:
+        """월별 데이터베이스 생성"""
+        if not self.parent_page_id:
+            logger.error("parent_page_id가 설정되지 않았습니다.")
+            return None
+        
+        month_key = target_date.strftime('%Y-%m')
+        db_name = self._get_monthly_db_name(target_date)
+        
+        try:
+            # 데이터베이스 속성 정의
+            properties = {
+                "제목": {"title": {}},
+                "카테고리": {
+                    "select": {
+                        "options": [
+                            {"name": "정당", "color": "purple"},
+                            {"name": "노동", "color": "red"},
+                            {"name": "환경", "color": "green"},
+                            {"name": "여성", "color": "pink"},
+                            {"name": "동물복지", "color": "orange"},
+                            {"name": "선거", "color": "blue"},
+                            {"name": "복지", "color": "yellow"},
+                            {"name": "인권", "color": "brown"},
+                            {"name": "지역", "color": "gray"},
+                            {"name": "일반", "color": "default"}
+                        ]
+                    }
+                },
+                "지역": {
+                    "select": {
+                        "options": [
+                            {"name": "창원", "color": "blue"},
+                            {"name": "김해", "color": "green"},
+                            {"name": "진주", "color": "purple"},
+                            {"name": "양산", "color": "orange"},
+                            {"name": "거제", "color": "pink"},
+                            {"name": "경상남도", "color": "red"},
+                            {"name": "그외", "color": "gray"}
+                        ]
+                    }
+                },
+                "중요도": {"number": {}},
+                "언론사": {"rich_text": {}},
+                "원문링크": {"url": {}},
+                "발행일시": {"date": {}},
+                "키워드": {"multi_select": {}},
+                "대응완료": {"checkbox": {}}
+            }
+            
+            # 데이터베이스 생성
+            response = self.client.databases.create(
+                parent={"type": "page_id", "page_id": self.parent_page_id},
+                title=[{"type": "text", "text": {"content": db_name}}],
+                icon={"type": "emoji", "emoji": "📰"},
+                properties=properties
+            )
+            
+            db_id = response["id"]
+            logger.info(f"월별 DB 생성 완료: {db_name} (ID: {db_id[:8]}...)")
+            
+            # 캐시에 저장
+            self._monthly_db_cache[month_key] = db_id
+            
+            return db_id
+            
+        except Exception as e:
+            logger.error(f"월별 DB 생성 실패: {e}")
+            return None
+    
+    def get_or_create_monthly_database(self, target_date: date) -> Optional[str]:
+        """월별 데이터베이스 가져오기 또는 생성
+        
+        Args:
+            target_date: 대상 날짜
+            
+        Returns:
+            데이터베이스 ID
+        """
+        # parent_page_id가 없으면 기존 database_id 사용
+        if not self.parent_page_id:
+            return self.database_id
+        
+        # 기존 DB 찾기
+        db_id = self._find_monthly_database(target_date)
+        
+        if db_id:
+            return db_id
+        
+        # 없으면 새로 생성
+        return self._create_monthly_database(target_date)
     
     def _get_importance_stars(self, score: int) -> str:
         """중요도 별표 문자열 생성"""
@@ -264,16 +410,30 @@ class NotionPublisher:
         
         return blocks
     
-    def create_news_page(self, article: NewsArticle) -> Optional[str]:
+    def create_news_page(self, article: NewsArticle, target_date: date = None) -> Optional[str]:
         """단일 뉴스 페이지 생성
         
         Args:
             article: 뉴스 기사
+            target_date: 대상 날짜 (월별 DB 선택용)
             
         Returns:
             생성된 페이지 ID (실패시 None)
         """
         try:
+            # 대상 날짜 결정
+            if target_date is None:
+                target_date = date.today()
+            
+            # 월별 DB 가져오기 또는 생성
+            db_id = self.get_or_create_monthly_database(target_date)
+            if not db_id:
+                logger.error("데이터베이스를 찾을 수 없습니다.")
+                return None
+            
+            # data_source_id 가져오기
+            data_source_id = self._fetch_data_source_id(db_id)
+            
             # 카테고리 이모지
             category = article.category or "일반"
             emoji = self.CATEGORY_EMOJI.get(category, "📰")
@@ -322,7 +482,7 @@ class NotionPublisher:
             response = self.client.pages.create(
                 parent={
                     "type": "data_source_id",
-                    "data_source_id": self.data_source_id
+                    "data_source_id": data_source_id
                 },
                 icon={"type": "emoji", "emoji": emoji},
                 properties=properties,
@@ -590,7 +750,8 @@ class NotionPublisher:
         articles: List[NewsArticle],
         create_summary: bool = True,
         insight: Optional[dict] = None,
-        period: Optional[str] = None
+        period: Optional[str] = None,
+        target_date: date = None
     ) -> dict:
         """여러 뉴스 기사 발행
         
@@ -599,6 +760,7 @@ class NotionPublisher:
             create_summary: 일일 요약 페이지 생성 여부
             insight: AI가 생성한 인사이트 딕셔너리 (선택)
             period: 기간 구분 ("오전", "오후" 또는 None)
+            target_date: 대상 날짜 (기본값: 오늘)
             
         Returns:
             발행 결과 딕셔너리
@@ -606,14 +768,25 @@ class NotionPublisher:
         results = {
             "success": [],
             "failed": [],
-            "summary_page_id": None
+            "summary_page_id": None,
+            "database_id": None
         }
         
-        logger.info(f"=== 노션 발행 시작: {len(articles)}건 ===")
+        # 대상 날짜 결정
+        if target_date is None:
+            target_date = date.today()
+        
+        logger.info(f"=== 노션 발행 시작: {len(articles)}건 ({target_date}) ===")
+        
+        # 월별 DB 확인/생성
+        db_id = self.get_or_create_monthly_database(target_date)
+        if db_id:
+            results["database_id"] = db_id
+            logger.info(f"사용할 DB: {db_id[:8]}...")
         
         # 개별 뉴스 페이지 생성
         for article in articles:
-            page_id = self.create_news_page(article)
+            page_id = self.create_news_page(article, target_date)
             if page_id:
                 results["success"].append(article.title)
             else:
@@ -622,7 +795,7 @@ class NotionPublisher:
         # 일일 요약 페이지 생성
         if create_summary and articles:
             summary_page_id = self.create_daily_summary_page(
-                target_date=date.today(),
+                target_date=target_date,
                 articles=articles,
                 insight=insight,
                 period=period

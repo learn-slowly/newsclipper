@@ -51,7 +51,15 @@ def run_news_clipper():
         logger.error("❌ GOOGLE_API_KEY가 설정되지 않았습니다")
         sys.exit(1)
     
-    if not settings.notion_api_key or not settings.notion_database_id:
+    # 월별 DB 사용 여부 확인
+    use_monthly = settings.use_monthly_db()
+    parent_page_id = settings.get_parent_page_id()
+    
+    if use_monthly and not parent_page_id:
+        logger.error("❌ 월별 DB를 사용하려면 NOTION_PARENT_PAGE_ID가 필요합니다")
+        sys.exit(1)
+    
+    if not use_monthly and (not settings.notion_api_key or not settings.notion_database_id):
         logger.error("❌ NOTION_API_KEY 또는 NOTION_DATABASE_ID가 설정되지 않았습니다")
         sys.exit(1)
     
@@ -74,10 +82,18 @@ def run_news_clipper():
         relevance_threshold=settings.relevance_threshold
     )
     
-    publisher = NotionPublisher(
-        api_key=settings.notion_api_key,
-        database_id=settings.notion_database_id
-    )
+    # NotionPublisher 초기화 (월별 DB 또는 기존 DB)
+    if use_monthly and parent_page_id:
+        logger.info(f"📅 월별 DB 모드 활성화 (상위 페이지: {parent_page_id[:8]}...)")
+        publisher = NotionPublisher(
+            api_key=settings.notion_api_key,
+            parent_page_id=parent_page_id
+        )
+    else:
+        publisher = NotionPublisher(
+            api_key=settings.notion_api_key,
+            database_id=settings.notion_database_id
+        )
     
     database = NewsDatabase(db_path=settings.db_path)
     

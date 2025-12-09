@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     google_api_key: str = Field(default="", description="Google AI (Gemini) API Key")
     notion_api_key: str = Field(default="", description="Notion Integration Token")
     notion_database_id: str = Field(default="", description="Notion Database ID")
+    notion_parent_page_id: Optional[str] = Field(default=None, description="Notion Parent Page ID for monthly DBs")
     naver_client_id: Optional[str] = Field(default=None, description="Naver API Client ID")
     naver_client_secret: Optional[str] = Field(default=None, description="Naver API Client Secret")
     
@@ -61,6 +62,26 @@ class Settings(BaseSettings):
         """뉴스 소스 설정 반환"""
         config = self.load_config()
         return config.get("news_sources", {})
+    
+    def get_notion_config(self) -> dict:
+        """노션 설정 반환"""
+        config = self.load_config()
+        return config.get("notion", {})
+    
+    def use_monthly_db(self) -> bool:
+        """월별 DB 사용 여부"""
+        notion_config = self.get_notion_config()
+        return notion_config.get("use_monthly_db", False)
+    
+    def get_parent_page_id(self) -> Optional[str]:
+        """상위 페이지 ID 반환 (환경변수 우선)"""
+        # 환경변수 우선
+        if self.notion_parent_page_id:
+            return self.notion_parent_page_id
+        # config.json에서 읽기
+        notion_config = self.get_notion_config()
+        parent_id = notion_config.get("parent_page_id", "")
+        return parent_id if parent_id else None
 
 
 @lru_cache()
