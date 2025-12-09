@@ -6,7 +6,7 @@
   },
   "notion": {
     "parent_page_id": "",
-    "use_monthly_db": true
+    "use_monthly_db": false
   },
   "keywords": {
     "issues": [

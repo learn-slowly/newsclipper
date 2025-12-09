@@ -72,6 +72,7 @@ class NotionPublisher:
         self.database_id = database_id
         self.data_source_id = None
         self._monthly_db_cache: Dict[str, str] = {}  # 월별 DB ID 캐시
+        self._monthly_data_source_cache: Dict[str, str] = {}  # 월별 data_source_id 캐시
         
         # 기존 database_id가 있으면 data_source_id 가져오기
         if database_id:
@@ -209,6 +210,9 @@ class NotionPublisher:
             # 캐시에 저장
             self._monthly_db_cache[month_key] = db_id
             
+            # 새 DB의 data_source_id 캐시
+            self._monthly_data_source_cache[month_key] = None  # 나중에 fetch
+            
             return db_id
             
         except Exception as e:
@@ -236,6 +240,28 @@ class NotionPublisher:
         
         # 없으면 새로 생성
         return self._create_monthly_database(target_date)
+    
+    def _get_data_source_id_for_db(self, db_id: str, target_date: date = None) -> str:
+        """특정 데이터베이스의 data_source_id 가져오기"""
+        # 기본 DB인 경우
+        if db_id == self.database_id and self.data_source_id:
+            return self.data_source_id
+        
+        # 월별 DB 캐시 확인
+        if target_date:
+            month_key = target_date.strftime('%Y-%m')
+            if month_key in self._monthly_data_source_cache and self._monthly_data_source_cache[month_key]:
+                return self._monthly_data_source_cache[month_key]
+        
+        # data_source_id 가져오기
+        data_source_id = self._fetch_data_source_id(db_id)
+        
+        # 캐시에 저장
+        if target_date:
+            month_key = target_date.strftime('%Y-%m')
+            self._monthly_data_source_cache[month_key] = data_source_id
+        
+        return data_source_id
     
     def _get_importance_stars(self, score: int) -> str:
         """중요도 별표 문자열 생성"""
@@ -432,7 +458,7 @@ class NotionPublisher:
                 return None
             
             # data_source_id 가져오기
-            data_source_id = self._fetch_data_source_id(db_id)
+            data_source_id = self._get_data_source_id_for_db(db_id, target_date)
             
             # 카테고리 이모지
             category = article.category or "일반"
@@ -717,11 +743,20 @@ class NotionPublisher:
                             }
                         })
             
+            # 월별 DB 가져오기 또는 생성
+            db_id = self.get_or_create_monthly_database(target_date)
+            if not db_id:
+                logger.error("데이터베이스를 찾을 수 없습니다.")
+                return None
+            
+            # data_source_id 가져오기
+            data_source_id = self._get_data_source_id_for_db(db_id, target_date)
+            
             # 페이지 생성 (2025-09-03: data_source_id 사용)
             if parent_page_id:
                 parent = {"type": "page_id", "page_id": parent_page_id}
             else:
-                parent = {"type": "data_source_id", "data_source_id": self.data_source_id}
+                parent = {"type": "data_source_id", "data_source_id": data_source_id}
             
             # 제목에 오전/오후 구분 추가
             title = f"📰 {date_str}{period_str} 뉴스 클리핑"

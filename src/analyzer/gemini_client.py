@@ -130,28 +130,40 @@ class GeminiAnalyzer:
                 )
                 batch_results = self._parse_json_response(response)
                 
-                if isinstance(batch_results, list):
+                if isinstance(batch_results, list) and len(batch_results) == len(batch):
+                    # 배치 결과가 정상적으로 파싱된 경우
                     results.extend(batch_results)
+                elif isinstance(batch_results, list) and len(batch_results) > 0:
+                    # 일부만 파싱된 경우 - 있는 것 사용 + 나머지는 제외 처리
+                    results.extend(batch_results)
+                    for _ in range(len(batch) - len(batch_results)):
+                        results.append({
+                            "is_relevant": False,
+                            "relevance_score": 0,
+                            "importance_score": 1,
+                            "reason": "배치 분석 결과 누락"
+                        })
                 else:
-                    # 개별 분석으로 폴백
+                    # 파싱 실패 - 모두 제외 처리 (안전하게)
+                    logger.warning(f"배치 분석 결과 파싱 실패, {len(batch)}건 제외 처리")
                     for article in batch:
-                        result = self.filter_news(
-                            title=article.title if hasattr(article, 'title') else article.get('title', ''),
-                            description=article.description if hasattr(article, 'description') else article.get('description', ''),
-                            category=article.category if hasattr(article, 'category') else article.get('category')
-                        )
-                        results.append(result)
+                        results.append({
+                            "is_relevant": False,
+                            "relevance_score": 0,
+                            "importance_score": 1,
+                            "reason": "배치 분석 파싱 실패"
+                        })
                         
             except Exception as e:
                 logger.error(f"배치 분석 실패: {e}")
-                # 개별 분석으로 폴백
+                # 에러 발생 시 모두 제외 처리 (안전하게)
                 for article in batch:
-                    result = self.filter_news(
-                        title=article.title if hasattr(article, 'title') else article.get('title', ''),
-                        description=article.description if hasattr(article, 'description') else article.get('description', ''),
-                        category=article.category if hasattr(article, 'category') else article.get('category')
-                    )
-                    results.append(result)
+                    results.append({
+                        "is_relevant": False,
+                        "relevance_score": 0,
+                        "importance_score": 1,
+                        "reason": f"배치 분석 오류: {str(e)[:50]}"
+                    })
             
             logger.info(f"배치 분석 완료: {i+len(batch)}/{len(articles)}")
         
@@ -170,8 +182,14 @@ class GeminiAnalyzer:
                 end = response.find("```", start)
                 response = response[start:end].strip()
             
-            # { 로 시작하는 JSON 찾기
-            if "{" in response:
+            # [ 로 시작하는 JSON 배열 찾기 (배치 분석용)
+            if "[" in response and response.strip().startswith("["):
+                start = response.find("[")
+                end = response.rfind("]") + 1
+                if end > start:
+                    response = response[start:end]
+            # { 로 시작하는 JSON 객체 찾기
+            elif "{" in response:
                 start = response.find("{")
                 end = response.rfind("}") + 1
                 if end > start:
@@ -186,7 +204,8 @@ class GeminiAnalyzer:
             result = self._extract_insight_from_text(response)
             if result:
                 return result
-            return {}
+            # 파싱 실패시 기본값 (제외 처리)
+            return {"is_relevant": False, "relevance_score": 0, "importance_score": 1, "reason": "JSON 파싱 실패"}
     
     def _extract_insight_from_text(self, text: str) -> dict:
         """마크다운 텍스트에서 인사이트 추출"""
