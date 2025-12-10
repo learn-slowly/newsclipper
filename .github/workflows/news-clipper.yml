@@ -2,10 +2,10 @@ name: 📰 News Clipper
 
 on:
   schedule:
-    # 오전 10시 (KST) = UTC 01:00
-    - cron: '0 1 * * *'
-    # 오후 18시 (KST) = UTC 09:00
-    - cron: '0 9 * * *'
+    # 오전 9시 (KST) = UTC 00:00
+    - cron: '0 0 * * *'
+    # 오후 17시 (KST) = UTC 08:00
+    - cron: '0 8 * * *'
   
   # 수동 실행 가능
   workflow_dispatch:

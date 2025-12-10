@@ -214,9 +214,9 @@
     ]
   },
   "schedule": {
-    "morning_run": "10:00",
+    "morning_run": "09:00",
     "morning_hours": 16,
-    "evening_run": "18:00",
+    "evening_run": "17:00",
     "evening_hours": 8,
     "timezone": "Asia/Seoul"
   },
