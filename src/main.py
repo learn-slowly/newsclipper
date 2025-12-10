@@ -205,8 +205,16 @@ def run_news_clipper():
         
         logger.info(f"✅ 분석 완료: 관련 뉴스 {len(passed_articles)}건")
         
-        # 3.5. 인사이트 생성
-        logger.info("💡 Step 3.5: 인사이트 생성 중...")
+        # 3.5. 유사 뉴스 그룹화
+        logger.info("🔗 Step 3.5: 유사 뉴스 그룹화 중...")
+        passed_articles = analyzer.deduplicate_similar_news(
+            articles=passed_articles,
+            similarity_threshold=0.5  # 50% 이상 유사하면 같은 뉴스로 판단
+        )
+        logger.info(f"📦 그룹화 완료: {len(passed_articles)}건")
+        
+        # 3.6. 인사이트 생성
+        logger.info("💡 Step 3.6: 인사이트 생성 중...")
         from analyzer.gemini_client import GeminiAnalyzer
         gemini = GeminiAnalyzer(
             api_key=settings.google_api_key,
