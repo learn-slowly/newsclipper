@@ -126,8 +126,36 @@ def run_news_clipper():
         
         logger.info(f"📥 수집 완료: {len(articles)}건")
         
-        # 1.5. 언론사 필터링
-        logger.info("📰 Step 1.5: 언론사 필터링 중...")
+        # 1.5. 발행 시간 필터링 (지정된 시간 내 뉴스만)
+        from datetime import timedelta
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        original_count = len(articles)
+        
+        filtered_by_time = []
+        no_date_count = 0
+        for article in articles:
+            if article.published_at:
+                # timezone-aware datetime 처리
+                pub_time = article.published_at
+                if pub_time.tzinfo is not None:
+                    # timezone 정보 제거하여 비교
+                    pub_time = pub_time.replace(tzinfo=None)
+                
+                if pub_time >= cutoff_time:
+                    filtered_by_time.append(article)
+            else:
+                # 발행일이 없는 경우 제외 (오래된 뉴스일 가능성)
+                no_date_count += 1
+        
+        articles = filtered_by_time
+        logger.info(f"⏰ 시간 필터링: {original_count}건 → {len(articles)}건 (최근 {hours}시간, 날짜없음 {no_date_count}건 제외)")
+        
+        if not articles:
+            logger.warning(f"최근 {hours}시간 내 뉴스가 없습니다")
+            return
+        
+        # 1.6. 언론사 필터링
+        logger.info("📰 Step 1.6: 언론사 필터링 중...")
         news_sources = config.get("news_sources", {})
         allowed_domains = []
         
