@@ -66,8 +66,8 @@ class NotionPublisher:
             database_id: 노션 데이터베이스 ID (기존 DB 사용시)
             parent_page_id: 월별 DB를 생성할 상위 페이지 ID (자동 생성시)
         """
-        # 2025-09-03 버전 사용
-        self.client = Client(auth=api_key, notion_version="2025-09-03")
+        # 2022-06-28 버전 사용 (안정성 확보)
+        self.client = Client(auth=api_key, notion_version="2022-06-28")
         self.parent_page_id = parent_page_id
         self.database_id = database_id
         self.data_source_id = None
@@ -105,141 +105,212 @@ class NotionPublisher:
                 self.data_source_id = target_db_id
             return target_db_id
     
+    def _get_week_number(self, d: date) -> int:
+        """
+        날짜의 주차를 계산합니다 (월요일 시작 기준).
+        2026년 1월 예시:
+        - 1주차: 1.1 ~ 1.4
+        - 2주차: 1.5 ~ 1.11
+        - 3주차: 1.12 ~ 1.18
+        - 4주차: 1.19 ~ 1.25
+        - 5주차: 1.26 ~ 1.31
+        """
+        # 2026년 1월 하드코딩 (안전성 확보)
+        if d.year == 2026 and d.month == 1:
+            if d.day <= 4: return 1
+            elif d.day <= 11: return 2
+            elif d.day <= 18: return 3
+            elif d.day <= 25: return 4
+            else: return 5
+            
+        # 일반적인 주차 계산 (ISO 달력 기준과 유사하게)
+        # 여기서는 단순하게 해당 월의 n번째 주차로 계산
+        # 1일이 속한 주를 1주차로 시작
+        first_day = d.replace(day=1)
+        adjusted_day = d.day + first_day.weekday()
+        return (adjusted_day - 1) // 7 + 1
+
+    def _get_weekly_summary_page_title(self, d: date) -> str:
+        week_num = self._get_week_number(d)
+        return f"{d.strftime('%Y-%m')} {week_num}주차 요약"
+
+    def _get_or_create_weekly_summary_page(self, target_date: date) -> str:
+        """주차별 요약 페이지를 가져오거나 생성합니다."""
+        if not self.parent_page_id:
+            logger.error("parent_page_id가 설정되지 않았습니다.")
+            return ""
+
+        page_title = self._get_weekly_summary_page_title(target_date)
+        
+        # 1. 이미 존재하는지 검색
+        # (성능을 위해 parent_page_id의 자식을 스캔하는 것이 좋음)
+        children = self.client.blocks.children.list(block_id=self.parent_page_id)
+        for block in children.get("results", []):
+            if block["type"] == "child_page":
+                title = block.get("child_page", {}).get("title", "")
+                if title == page_title:
+                    return block["id"]
+        
+        # 2. 없으면 생성
+        logger.info(f"주차별 요약 페이지 생성: {page_title}")
+        try:
+            response = self.client.pages.create(
+                parent={"page_id": self.parent_page_id},
+                icon={"type": "emoji", "emoji": "📁"},
+                properties={
+                    "title": {
+                        "title": [{"text": {"content": page_title}}]
+                    }
+                }
+            )
+            return response["id"]
+        except Exception as e:
+            logger.error(f"주차별 요약 페이지 생성 실패: {e}")
+            return ""
+
+    def _get_weekly_db_name(self, target_date: date) -> str:
+        """주차별 DB 이름 생성"""
+        week_num = self._get_week_number(target_date)
+        return f"📰 {target_date.strftime('%Y-%m')} {week_num}주차 뉴스클리핑"
+
     def _get_monthly_db_name(self, target_date: date) -> str:
-        """월별 DB 이름 생성"""
+        # Backward compatibility or unused now
         return f"📰 {target_date.strftime('%Y-%m')} 뉴스클리핑"
     
-    def _find_monthly_database(self, target_date: date) -> Optional[str]:
-        """기존 월별 데이터베이스 찾기"""
-        month_key = target_date.strftime('%Y-%m')
-        
-        # 캐시 확인
-        if month_key in self._monthly_db_cache:
-            return self._monthly_db_cache[month_key]
-        
-        if not self.parent_page_id:
-            return None
+    def _find_weekly_database(self, summary_page_id: str, target_date: date) -> Optional[str]:
+        """주차별 요약 페이지 내에서 주차별 데이터베이스 찾기"""
+        db_name = self._get_weekly_db_name(target_date)
         
         try:
-            # 상위 페이지의 자식 블록 조회
-            db_name = self._get_monthly_db_name(target_date)
-            
             # 페이지 내 자식 블록 검색
-            children = self.client.blocks.children.list(block_id=self.parent_page_id)
+            children = self.client.blocks.children.list(block_id=summary_page_id)
             
             for block in children.get("results", []):
                 if block.get("type") == "child_database":
-                    # 데이터베이스 정보 조회
                     db_id = block["id"]
                     db_info = self.client.databases.retrieve(database_id=db_id)
                     title_parts = db_info.get("title", [])
                     if title_parts:
                         title = "".join([t.get("plain_text", "") for t in title_parts])
-                        if month_key in title:
-                            logger.info(f"기존 월별 DB 발견: {title}")
-                            self._monthly_db_cache[month_key] = db_id
+                        if db_name == title:
+                            logger.info(f"기존 주차별 DB 발견: {title}")
                             return db_id
-            
             return None
-            
         except Exception as e:
-            logger.error(f"월별 DB 검색 실패: {e}")
+            logger.error(f"주차별 DB 검색 실패: {e}")
             return None
     
-    def _create_monthly_database(self, target_date: date) -> Optional[str]:
-        """월별 데이터베이스 생성"""
-        if not self.parent_page_id:
-            logger.error("parent_page_id가 설정되지 않았습니다.")
-            return None
+    def get_or_create_weekly_database(self, target_date: date) -> Optional[str]:
+        db_name = self._get_weekly_db_name(target_date)
+        if db_name in self._monthly_db_cache:
+            return self._monthly_db_cache[db_name]
+
+        # [Modified] 전역 검색(search) 제거 - 잘못된 DB(예: 12월 DB)가 검색되는 문제 방지
+        # 대신, 상위 페이지 내에서 주차별 요약 페이지를 찾고, 그 안의 DB를 찾거나 새로 생성하는 방식 사용
         
-        month_key = target_date.strftime('%Y-%m')
-        db_name = self._get_monthly_db_name(target_date)
+        # 1. 주차별 요약 페이지 ID 찾기 (또는 생성)
+        summary_page_id = self._get_or_create_weekly_summary_page(target_date)
+        if not summary_page_id:
+            logger.error("주차별 요약 페이지를 준비할 수 없습니다.")
+            return None
+
+        # 2. 요약 페이지 내에 이미 DB가 있는지 확인
+        existing_db_id = self._find_weekly_database(summary_page_id, target_date)
+        if existing_db_id:
+            self._monthly_db_cache[db_name] = existing_db_id
+            return existing_db_id
+
+        # Summary Page는 위에서 이미 확보함
+
+        
+        # 데이터베이스 속성 정의
+        properties = {
+            "제목": {"title": {}},
+            "카테고리": {
+                "select": {
+                    "options": [
+                        {"name": "정당", "color": "purple"},
+                        {"name": "노동", "color": "red"},
+                        {"name": "환경", "color": "green"},
+                        {"name": "여성", "color": "pink"},
+                        {"name": "동물복지", "color": "orange"},
+                        {"name": "선거", "color": "blue"},
+                        {"name": "복지", "color": "yellow"},
+                        {"name": "인권", "color": "brown"},
+                        {"name": "지역", "color": "gray"},
+                        {"name": "일반", "color": "default"}
+                    ]
+                }
+            },
+            "지역": {
+                "select": {
+                    "options": [
+                        {"name": "창원", "color": "blue"},
+                        {"name": "김해", "color": "green"},
+                        {"name": "진주", "color": "purple"},
+                        {"name": "양산", "color": "orange"},
+                        {"name": "거제", "color": "pink"},
+                        {"name": "경상남도", "color": "red"},
+                        {"name": "그외", "color": "gray"}
+                    ]
+                }
+            },
+            "중요도": {"number": {}},
+            "언론사": {"rich_text": {}},
+            "원문링크": {"url": {}},
+            "발행일시": {"date": {}},
+            "키워드": {"multi_select": {}},
+            "대응완료": {"checkbox": {}}
+        }
         
         try:
-            # 데이터베이스 속성 정의
-            properties = {
-                "제목": {"title": {}},
-                "카테고리": {
-                    "select": {
-                        "options": [
-                            {"name": "정당", "color": "purple"},
-                            {"name": "노동", "color": "red"},
-                            {"name": "환경", "color": "green"},
-                            {"name": "여성", "color": "pink"},
-                            {"name": "동물복지", "color": "orange"},
-                            {"name": "선거", "color": "blue"},
-                            {"name": "복지", "color": "yellow"},
-                            {"name": "인권", "color": "brown"},
-                            {"name": "지역", "color": "gray"},
-                            {"name": "일반", "color": "default"}
-                        ]
-                    }
-                },
-                "지역": {
-                    "select": {
-                        "options": [
-                            {"name": "창원", "color": "blue"},
-                            {"name": "김해", "color": "green"},
-                            {"name": "진주", "color": "purple"},
-                            {"name": "양산", "color": "orange"},
-                            {"name": "거제", "color": "pink"},
-                            {"name": "경상남도", "color": "red"},
-                            {"name": "그외", "color": "gray"}
-                        ]
-                    }
-                },
-                "중요도": {"number": {}},
-                "언론사": {"rich_text": {}},
-                "원문링크": {"url": {}},
-                "발행일시": {"date": {}},
-                "키워드": {"multi_select": {}},
-                "대응완료": {"checkbox": {}}
-            }
-            
-            # 데이터베이스 생성
-            response = self.client.databases.create(
-                parent={"type": "page_id", "page_id": self.parent_page_id},
-                title=[{"type": "text", "text": {"content": db_name}}],
-                icon={"type": "emoji", "emoji": "📰"},
-                properties=properties
+            # 데이터베이스 생성 (2022-06-28 API Spec)
+            # Global Parent 하위에 생성
+            response = self.client.request(
+                path="databases",
+                method="POST",
+                body={
+                    "parent": {"type": "page_id", "page_id": self.parent_page_id},
+                    "title": [{"type": "text", "text": {"content": db_name}}],
+                    "icon": {"type": "emoji", "emoji": "📰"},
+                    "properties": properties
+                }
             )
             
             db_id = response["id"]
-            logger.info(f"월별 DB 생성 완료: {db_name} (ID: {db_id[:8]}...)")
-            
-            # 캐시에 저장
-            self._monthly_db_cache[month_key] = db_id
-            
-            # 새 DB의 data_source_id 캐시
-            self._monthly_data_source_cache[month_key] = None  # 나중에 fetch
-            
+            logger.info(f"주차별 DB 생성 완료: {db_name} ({db_id})")
+
+            # [Optional] 요약 페이지에 링크 추가
+            if summary_page_id:
+                try:
+                    self.client.blocks.children.append(
+                        block_id=summary_page_id,
+                        children=[
+                            {
+                                "object": "block", 
+                                "type": "paragraph", 
+                                "paragraph": {
+                                    "rich_text": [
+                                        {"type": "text", "text": {"content": "🔗 관련 뉴스 데이터베이스: "}},
+                                        {"type": "mention", "mention": {"type": "database", "database": {"id": db_id}}}
+                                    ]
+                                }
+                            }
+                        ]
+                    )
+                except Exception as e:
+                    logger.warning(f"요약 페이지에 DB 링크 추가 실패: {e}")
+
+            self._monthly_db_cache[db_name] = db_id
             return db_id
             
         except Exception as e:
-            logger.error(f"월별 DB 생성 실패: {e}")
+            logger.error(f"주차별 DB 생성 실패: {e}")
             return None
-    
+
     def get_or_create_monthly_database(self, target_date: date) -> Optional[str]:
-        """월별 데이터베이스 가져오기 또는 생성
-        
-        Args:
-            target_date: 대상 날짜
-            
-        Returns:
-            데이터베이스 ID
-        """
-        # parent_page_id가 없으면 기존 database_id 사용
-        if not self.parent_page_id:
-            return self.database_id
-        
-        # 기존 DB 찾기
-        db_id = self._find_monthly_database(target_date)
-        
-        if db_id:
-            return db_id
-        
-        # 없으면 새로 생성
-        return self._create_monthly_database(target_date)
+        # Alias for backward compatibility
+        return self.get_or_create_weekly_database(target_date)
     
     def _get_data_source_id_for_db(self, db_id: str, target_date: date = None) -> str:
         """특정 데이터베이스의 data_source_id 가져오기"""
@@ -457,8 +528,8 @@ class NotionPublisher:
                 logger.error("데이터베이스를 찾을 수 없습니다.")
                 return None
             
-            # data_source_id 가져오기
-            data_source_id = self._get_data_source_id_for_db(db_id, target_date)
+            # data_source_id 가져오기 (SKIP: data_source_id가 잘못된 ID를 반환하는 경우 방지)
+            # data_source_id = self._get_data_source_id_for_db(db_id, target_date)
             
             # 카테고리 이모지
             category = article.category or "일반"
@@ -466,6 +537,13 @@ class NotionPublisher:
             
             # 지역 추출
             region = self._extract_region(article)
+
+            # [GUARD] 2026년 기사가 2025년 12월 DB로 들어가는 문제 방지
+            # Dec 2025 DB ID: 2c3bfd7bbb8e80cb8338ce1e36823e8a
+            DEC_2025_DB_ID = "2c3bfd7bbb8e80cb8338ce1e36823e8a"
+            if target_date.year >= 2026 and db_id.replace("-", "") == DEC_2025_DB_ID:
+                logger.warning(f"⛔ [GUARD] 2026년 기사({target_date})가 12월 DB({db_id})로 저장되는 것을 차단했습니다.")
+                return None
             
             # 페이지 속성
             properties = {
@@ -504,11 +582,11 @@ class NotionPublisher:
                     "multi_select": [{"name": kw} for kw in article.keywords[:5]]
                 }
             
-            # 페이지 생성 (2025-09-03: data_source_id 사용)
+            # 페이지 생성
             response = self.client.pages.create(
                 parent={
-                    "type": "data_source_id",
-                    "data_source_id": data_source_id
+                    "type": "database_id",
+                    "database_id": db_id  # Use db_id directly
                 },
                 icon={"type": "emoji", "emoji": emoji},
                 properties=properties,
@@ -743,32 +821,42 @@ class NotionPublisher:
                             }
                         })
             
-            # 월별 DB 가져오기 또는 생성
-            db_id = self.get_or_create_monthly_database(target_date)
-            if not db_id:
-                logger.error("데이터베이스를 찾을 수 없습니다.")
-                return None
+            # 주차별 요약 페이지 확보 (부모 페이지로 사용)
+            weekly_page_id = self._get_or_create_weekly_summary_page(target_date)
             
-            # data_source_id 가져오기
-            data_source_id = self._get_data_source_id_for_db(db_id, target_date)
+            # 주차별 DB 생성 (존재 확인용)
+            self.get_or_create_weekly_database(target_date)
             
-            # 페이지 생성 (2025-09-03: data_source_id 사용)
+            # 제목 definition moved up
+            title = f"📰 {date_str}{period_str} 뉴스 클리핑"
+            
+            # 페이지 생성
+            page_properties = {}
+            parent = {}
+            
             if parent_page_id:
                 parent = {"type": "page_id", "page_id": parent_page_id}
+                page_properties = {
+                    "title": {"title": [{"text": {"content": title}}]}
+                }
+            elif weekly_page_id:
+                parent = {"type": "page_id", "page_id": weekly_page_id}
+                page_properties = {
+                    "title": {"title": [{"text": {"content": title}}]}
+                }
             else:
-                parent = {"type": "data_source_id", "data_source_id": data_source_id}
-            
-            # 제목에 오전/오후 구분 추가
-            title = f"📰 {date_str}{period_str} 뉴스 클리핑"
+                db_id = self.get_or_create_monthly_database(target_date)
+                data_source_id = self._get_data_source_id_for_db(db_id, target_date)
+                # FIX: use database_id type
+                parent = {"type": "database_id", "database_id": data_source_id}
+                page_properties = {
+                    "제목": {"title": [{"text": {"content": title}}]}
+                }
             
             response = self.client.pages.create(
                 parent=parent,
                 icon={"type": "emoji", "emoji": "📰"},
-                properties={
-                    "제목": {
-                        "title": [{"text": {"content": title}}]
-                    }
-                },
+                properties=page_properties,
                 children=blocks
             )
             

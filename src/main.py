@@ -82,18 +82,25 @@ def run_news_clipper():
         relevance_threshold=settings.relevance_threshold
     )
     
-    # NotionPublisher 초기화 (월별 DB 또는 기존 DB)
-    if use_monthly and parent_page_id:
-        logger.info(f"📅 월별 DB 모드 활성화 (상위 페이지: {parent_page_id[:8]}...)")
+    # NotionPublisher 초기화
+    # [Mod] parent_page_id가 있으면 무조건 월별 DB 모드(자동 타겟팅) 활성화
+    # database_id가 있어도 무시하여 12월 DB 등 과거 DB로 들어가는 것을 방지
+    if parent_page_id:
+        logger.info(f"📅 월별 DB 모드 활성화 (상위 페이지: {parent_page_id[:8]}...) - 자동 타겟팅")
         publisher = NotionPublisher(
             api_key=settings.notion_api_key,
             parent_page_id=parent_page_id
+            # database_id는 전달하지 않음
         )
-    else:
+    elif settings.notion_database_id:
+        logger.info("📅 단일 DB 모드 활성화 (고정 DB 사용)")
         publisher = NotionPublisher(
             api_key=settings.notion_api_key,
             database_id=settings.notion_database_id
         )
+    else:
+        logger.error("❌ DB 설정 오류: NOTION_PARENT_PAGE_ID 또는 NOTION_DATABASE_ID 중 하나는 필수입니다.")
+        sys.exit(1)
     
     database = NewsDatabase(db_path=settings.db_path)
     
