@@ -1,8 +1,1 @@
-"""
-Political News Clipper
-정의당 경남도당 뉴스 클리핑 자동화 서비스
-"""
-
-__version__ = "1.0.0"
-__author__ = "레고"
-
+"""clipboard055 — 정의당 경남도당 일일 뉴스 브리핑 자동화 시스템"""
