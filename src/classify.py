@@ -15,7 +15,7 @@ from src.collect import Article
 
 
 # ── 상수 ────────────────────────────────────
-HAIKU_MODEL = "claude-haiku-4-5-20241022"
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 # 분류 프롬프트 파일 경로
 PROMPT_PATH = Path(__file__).parent / "prompts" / "classify.txt"
@@ -76,8 +76,10 @@ def classify_article(
         tokens_in = response.usage.input_tokens
         tokens_out = response.usage.output_tokens
 
-        # JSON 파싱
+        # JSON 파싱 (```json 코드 블록 제거)
         text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json.loads(text)
 
         # 값 검증

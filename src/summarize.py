@@ -15,7 +15,7 @@ from src.collect import Article
 
 
 # ── 상수 ────────────────────────────────────
-SONNET_MODEL = "claude-sonnet-4-6-20250514"
+SONNET_MODEL = "claude-4-sonnet-20250514"
 
 # 요약 프롬프트 파일 경로
 PROMPT_PATH = Path(__file__).parent / "prompts" / "summarize.txt"
@@ -75,7 +75,10 @@ def summarize_article(
         tokens_in = response.usage.input_tokens
         tokens_out = response.usage.output_tokens
 
+        # JSON 파싱 (```json 코드 블록 제거)
         text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json.loads(text)
 
         return {
