@@ -8,6 +8,9 @@ on:
   # 수동 실행
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   briefing:
     runs-on: ubuntu-latest
@@ -36,6 +39,15 @@ jobs:
           TIMEZONE: Asia/Seoul
         run: |
           python -m src.main
+
+      - name: Commit DB changes
+        if: always()
+        run: |
+          git config user.name "clipboard055-bot"
+          git config user.email "bot@clipboard055"
+          git add state/seen.db
+          git diff --cached --quiet || git commit -m "chore: DB 업데이트 ($(date +%Y-%m-%d))"
+          git push
 
       - name: Upload logs
         if: always()

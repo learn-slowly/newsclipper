@@ -13,7 +13,6 @@ clipboard055 메인 파이프라인
 """
 
 import asyncio
-import json
 import os
 import sys
 from datetime import datetime
@@ -182,27 +181,19 @@ async def run_pipeline():
 
         # 8. DB 기록
         logger.info("💾 Step 8: 실행 기록 저장")
+        today = datetime.now().strftime("%Y-%m-%d")
 
         # 처리한 기사를 seen에 기록
         for article in articles:
             storage.mark_seen(article.url_hash, article.url, article.title)
 
-        # 브리핑 기록 저장
-        articles_data = [
-            {
-                "title": a.title,
-                "url": a.url,
-                "source": a.source,
-                "category": a.category,
-                "importance": a.importance,
-                "scope": a.scope,
-            }
-            for a in articles
-        ]
+        # 기사 개별 저장
+        storage.save_articles(articles, briefing_date=today)
 
+        # 브리핑 실행 기록 저장
         storage.save_briefing(
-            date=datetime.now().strftime("%Y-%m-%d"),
-            articles_json=json.dumps(articles_data, ensure_ascii=False),
+            date=today,
+            article_count=len(articles),
             sent_telegram=sent,
             haiku_tokens_in=haiku_in,
             haiku_tokens_out=haiku_out,

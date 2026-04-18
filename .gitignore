@@ -12,8 +12,7 @@ build/
 .venv/
 venv/
 
-# SQLite
-state/*.db
+# SQLite (seen.db는 git에 포함 — 중복 체크 + 기사 아카이브용)
 *.sqlite3
 
 # 로그
