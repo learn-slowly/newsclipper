@@ -2,8 +2,10 @@ name: Daily Briefing
 
 on:
   schedule:
-    # 매일 오전 7시 (KST) = UTC 22:00 (전날)
-    - cron: '0 22 * * *'
+    # 매일 오전 8시 (KST) = UTC 23:00 (전날)
+    - cron: '0 23 * * *'
+    # 매일 저녁 6시 (KST) = UTC 09:00
+    - cron: '0 9 * * *'
 
   # 수동 실행
   workflow_dispatch:
