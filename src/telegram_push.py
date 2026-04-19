@@ -53,11 +53,15 @@ def _format_section(section: Section) -> str:
 
 def format_briefing(sections: list[Section], total_collected: int) -> str:
     """전체 브리핑 메시지 생성"""
-    today = datetime.now().strftime("%Y-%m-%d (%a)")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d (%a)")
     total_selected = sum(len(s.articles) for s in sections)
 
+    # 오전/저녁 구분 (정오 기준)
+    time_label = "아침" if now.hour < 12 else "저녁"
+
     header = (
-        f"📰 경남도당 아침 브리핑 | {today}\n"
+        f"📰 경남도당 {time_label} 브리핑 | {today}\n"
         f"오늘 총 {total_collected}건 중 {total_selected}건 선별"
     )
 
