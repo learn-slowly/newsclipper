@@ -95,8 +95,12 @@ def _parse_date(entry) -> Optional[datetime]:
 
 
 def _clean_html(text: str) -> str:
-    """HTML 태그 제거"""
-    return re.sub(r"<[^>]+>", "", text).strip()
+    """HTML 태그·엔티티 제거, 공백 정리"""
+    import html
+    text = re.sub(r"<[^>]+>", "", text)   # 태그 제거
+    text = html.unescape(text)            # &apos; &quot; &nbsp; 등 디코딩
+    text = re.sub(r"\s+", " ", text)      # 연속 공백 정리
+    return text.strip()
 
 
 def collect_from_feed(
@@ -131,7 +135,7 @@ def collect_from_feed(
         feed = feedparser.parse(content)
 
         for entry in feed.entries:
-            title = entry.get("title", "").strip()
+            title = _clean_html(entry.get("title", ""))
             link = entry.get("link", "")
             summary = _clean_html(
                 entry.get("summary", entry.get("description", ""))

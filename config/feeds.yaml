@@ -7,6 +7,9 @@ regional:
   - name: 경남도민일보
     url: https://www.idomin.com/rss/allArticle.xml
     scope: gyeongnam
+  - name: 경남일보
+    url: https://cdn.gnnews.co.kr/rss/gn_rss_allArticle.xml
+    scope: gyeongnam
 
 # ── 노동 전문 매체 ──────────────────────────────
 labor:

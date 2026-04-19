@@ -23,6 +23,7 @@ from loguru import logger
 
 from src.collect import Article, collect_all
 from src.classify import classify_articles
+from src.scrape import scrape_all
 from src.dedupe import deduplicate_similar, filter_seen
 from src.section_builder import PHASE1_ACTIVE, build_sections
 from src.storage import Storage
@@ -104,13 +105,26 @@ async def run_pipeline():
     storage = Storage()
 
     try:
-        # 1. RSS 수집
-        logger.info("📥 Step 1: RSS 수집")
+        # 1. RSS 수집 + 웹 스크래핑
+        logger.info("📥 Step 1-a: RSS 수집")
         articles = collect_all(hours=24)
+
+        logger.info("📥 Step 1-b: 웹 스크래핑 (경남 지역 매체)")
+        scraped = scrape_all()
+        articles.extend(scraped)
 
         if not articles:
             logger.warning("수집된 기사가 없습니다")
             return
+
+        # URL 기준 중복 제거 (RSS와 스크래핑 간 겹칠 수 있음)
+        seen_urls = set()
+        unique = []
+        for a in articles:
+            if a.url not in seen_urls:
+                seen_urls.add(a.url)
+                unique.append(a)
+        articles = unique
 
         total_collected = len(articles)
 

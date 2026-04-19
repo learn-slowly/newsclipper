@@ -1,0 +1,21 @@
+# 웹 스크래핑 대상 매체
+# RSS가 없는 경남 지역 매체를 스크래핑으로 수집한다
+
+sources:
+  # 경남신문: 기사 목록이 JS(AJAX)로 로딩 — 일반 스크래핑 불가. 추후 Playwright 검토
+
+  - name: MBC경남
+    url: https://www.mbcgn.kr/01_new/new01_list.asp
+    scope: gyeongnam
+    # onclick="javascript:NewsViewFunc(ID)" 패턴에서 ID 추출
+    selector: "a[href*='NewsViewFunc']"
+    base_url: https://www.mbcgn.kr
+    article_url_template: "https://www.mbcgn.kr/01_new/new01_view.asp?mn_lnk=B&idx={id}"
+
+  # KBS경남: 봇 접근 완전 차단 — RSS도 없음. 추후 대안 검토
+
+  - name: KNN
+    url: https://news.knn.co.kr/news
+    scope: gyeongnam
+    selector: "a[href*='/news/article/']"
+    base_url: https://news.knn.co.kr
