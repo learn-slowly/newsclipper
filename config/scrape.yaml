@@ -19,3 +19,8 @@ sources:
     scope: gyeongnam
     selector: "a[href*='/news/article/']"
     base_url: https://news.knn.co.kr
+
+  - name: KBS경남
+    url: https://www.youtube.com/@kbsnews_gyeongnam/videos
+    scope: gyeongnam
+    # 유튜브 채널 페이지에서 영상 제목·URL 스크래핑 (RSS 차단, 봇 차단 우회)

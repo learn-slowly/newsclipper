@@ -11,7 +11,7 @@ import httpx
 from loguru import logger
 
 from src.collect import Article
-from src.section_builder import Section
+from src.section_builder import ArticleGroup, Section
 
 
 # 텔레그램 메시지 최대 길이
@@ -42,13 +42,54 @@ def _format_article(article: Article) -> str:
     return line
 
 
+def _format_group(group: ArticleGroup) -> str:
+    """기사 그룹을 텔레그램 메시지 포맷으로 변환
+
+    대표 기사: 제목 + 코멘트 + 링크
+    관련 기사: 출처명 + 링크만 간략히
+    """
+    primary = group.primary
+    fire = "🔥 " if primary.importance == 5 else ""
+    scope_label = _format_scope(primary.scope)
+
+    line = f"{fire}[{primary.importance}|{scope_label}] {primary.title}"
+
+    if primary.ai_comment:
+        line += f"\n   → {primary.ai_comment}"
+
+    line += f"\n   {primary.url}"
+
+    # 관련 기사가 있으면 출처 + 링크 추가
+    if group.related:
+        line += f"\n   📎 관련 {len(group.related)}건:"
+        for related in group.related:
+            line += f"\n   · [{related.source}] {related.url}"
+
+    return line
+
+
 def _format_section(section: Section) -> str:
     """단일 섹션을 텔레그램 메시지 포맷으로 변환"""
-    header = f"{section.emoji} {section.name} ({len(section.articles)}건)"
-    articles_text = "\n\n".join(
-        _format_article(a) for a in section.articles
-    )
-    return f"{header}\n{articles_text}"
+    total = len(section.articles)
+    group_count = len(section.groups)
+
+    # 그룹이 있으면 이슈 수로 표시
+    if group_count < total:
+        header = f"{section.emoji} {section.name} ({group_count}건의 이슈, {total}건 기사)"
+    else:
+        header = f"{section.emoji} {section.name} ({total}건)"
+
+    # 그룹 기반으로 포맷
+    if section.groups:
+        items_text = "\n\n".join(
+            _format_group(g) for g in section.groups
+        )
+    else:
+        items_text = "\n\n".join(
+            _format_article(a) for a in section.articles
+        )
+
+    return f"{header}\n{items_text}"
 
 
 def format_briefing(sections: list[Section], total_collected: int) -> str:

@@ -6,6 +6,7 @@ RSS가 없는 경남 지역 매체(경남신문, MBC경남, KBS경남, KNN)에�
 """
 
 import html
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -129,6 +130,31 @@ def _extract_links_from_html(html_text: str, source_config: dict) -> list[dict]:
             if url not in seen_urls:
                 seen_urls.add(url)
                 articles.append({"title": title, "url": url})
+
+    elif name == "KBS경남":
+        # 유튜브 채널 페이지에서 ytInitialData JSON으로 영상 제목·URL 추출
+        match = re.search(r'var ytInitialData = ({.+?});</script>', html_text)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+                tabs = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
+                for tab in tabs:
+                    items = tab.get("tabRenderer", {}).get("content", {}).get("richGridRenderer", {}).get("contents", [])
+                    for item in items:
+                        video = item.get("richItemRenderer", {}).get("content", {}).get("videoRenderer", {})
+                        if not video:
+                            continue
+                        title = video.get("title", {}).get("runs", [{}])[0].get("text", "")
+                        video_id = video.get("videoId", "")
+                        if title and video_id:
+                            # 제목에서 " / KBS  2026.04.21." 같은 꼬리 제거
+                            title = re.sub(r"\s*/\s*KBS\s*\d{4}\.\d{2}\.\d{2}\.\s*$", "", title).strip()
+                            url = f"https://www.youtube.com/watch?v={video_id}"
+                            if title and len(title) >= 5 and url not in seen_urls:
+                                seen_urls.add(url)
+                                articles.append({"title": title, "url": url})
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"[KBS경남] 유튜브 JSON 파싱 실패: {e}")
 
     else:
         # 기본: href에서 링크 추출

@@ -21,7 +21,7 @@ SONNET_MODEL = "claude-4-sonnet-20250514"
 PROMPT_PATH = Path(__file__).parent / "prompts" / "summarize.txt"
 
 # 중요도 임계값: 이 점수 이상만 Sonnet 요약 처리
-IMPORTANCE_THRESHOLD = 3
+IMPORTANCE_THRESHOLD = 4
 
 # 월 비용 초과 시 상향되는 임계값
 IMPORTANCE_THRESHOLD_HIGH = 4

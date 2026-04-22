@@ -21,8 +21,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.collect import Article, collect_all
+from src.collect import Article, collect_all, load_feeds
 from src.classify import classify_articles
+from src.keyword_boost import apply_keyword_boost, apply_trusted_boost, prefilter_articles
 from src.scrape import scrape_all
 from src.dedupe import deduplicate_similar, filter_seen
 from src.section_builder import PHASE1_ACTIVE, build_sections
@@ -105,6 +106,19 @@ async def run_pipeline():
     storage = Storage()
 
     try:
+        # 신뢰 매체 목록 구성 (RSS: trusted 필드가 없거나 true인 매체 + 스크래핑 매체 전부)
+        all_feeds = load_feeds()
+        trusted_sources = {
+            f["name"] for f in all_feeds
+            if f.get("trusted", True) is True
+        }
+        # 스크래핑 매체도 신뢰 매체에 포함 (MBC경남, KNN, KBS경남 등)
+        from src.scrape import load_scrape_config
+        scrape_sources = load_scrape_config()
+        for s in scrape_sources:
+            trusted_sources.add(s["name"])
+        logger.info(f"신뢰 매체: {len(trusted_sources)}개")
+
         # 1. RSS 수집 + 웹 스크래핑
         logger.info("📥 Step 1-a: RSS 수집")
         articles = collect_all(hours=24)
@@ -146,9 +160,25 @@ async def run_pipeline():
 
         logger.info(f"✨ 신규 기사: {len(articles)}건")
 
+        # 3-b. 사전 키워드 필터 (구글 알리미 노이즈 제거)
+        logger.info("🔍 Step 3-b: 사전 키워드 필터")
+        articles, filtered_count = prefilter_articles(articles, trusted_sources)
+
+        if not articles:
+            logger.info("키워드 필터 후 기사가 없습니다")
+            return
+
         # 4. 1차 분류 (Haiku)
         logger.info("🏷️ Step 4: AI 분류 (Haiku)")
         articles, haiku_in, haiku_out = classify_articles(articles, api_key)
+
+        # 4-b. 키워드 교차 매칭 가산 (지역명 × 카테고리 키워드)
+        logger.info("🔍 Step 4-b: 키워드 교차 매칭 가산")
+        articles = apply_keyword_boost(articles)
+
+        # 4-c. 신뢰 매체 가산
+        logger.info("⭐ Step 4-c: 신뢰 매체 가산")
+        articles = apply_trusted_boost(articles, trusted_sources)
 
         # 중요도 1점 제거
         articles = [a for a in articles if a.importance > 1]
