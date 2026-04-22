@@ -112,7 +112,8 @@ def build_sections(
 
         # 빈 섹션 생략
         if matched:
-            groups = _group_similar(matched)
+            # 그룹화 없이 기사별로 개별 표시
+            groups = [ArticleGroup(primary=a) for a in matched]
             sections.append(Section(
                 number=number,
                 name=name,
