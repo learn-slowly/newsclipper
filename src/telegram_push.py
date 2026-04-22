@@ -162,6 +162,7 @@ async def send_telegram(
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     messages = split_message(text)
+    failed = 0
 
     async with httpx.AsyncClient() as client:
         for i, msg in enumerate(messages):
@@ -173,18 +174,33 @@ async def send_telegram(
 
             try:
                 response = await client.post(url, json=payload, timeout=30)
-                response.raise_for_status()
-                data = response.json()
 
+                if response.status_code != 200:
+                    body = response.text
+                    logger.error(
+                        f"텔레그램 발송 실패 ({i+1}/{len(messages)}): "
+                        f"HTTP {response.status_code} - {body}\n"
+                        f"메시지 길이: {len(msg)}자"
+                    )
+                    failed += 1
+                    continue
+
+                data = response.json()
                 if not data.get("ok"):
-                    logger.error(f"텔레그램 발송 실패 ({i+1}/{len(messages)}): {data}")
-                    return False
+                    logger.error(f"텔레그램 API 오류 ({i+1}/{len(messages)}): {data}")
+                    failed += 1
+                    continue
 
             except Exception as e:
                 logger.error(f"텔레그램 발송 오류 ({i+1}/{len(messages)}): {e}")
-                return False
+                failed += 1
+                continue
 
-    logger.info(f"텔레그램 발송 완료 ({len(messages)}개 ��시지)")
+    if failed:
+        logger.warning(f"텔레그램 발송: {len(messages)}개 중 {failed}개 실패")
+        return failed < len(messages)  # 전부 실패한 경우만 False
+
+    logger.info(f"텔레그램 발송 완료 ({len(messages)}개 메시지)")
     return True
 
 
