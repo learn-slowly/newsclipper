@@ -1,13 +1,7 @@
 name: Daily Briefing
 
 on:
-  schedule:
-    # 매일 오전 8시 (KST) = UTC 23:00 (전날)
-    - cron: '0 23 * * *'
-    # 매일 저녁 6시 (KST) = UTC 09:00
-    - cron: '0 9 * * *'
-
-  # 수동 실행
+  # cron-job.org에서 workflow_dispatch로 트리거 (아침 7시, 저녁 7시 KST)
   workflow_dispatch:
 
 permissions:
