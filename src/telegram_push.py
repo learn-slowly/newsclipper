@@ -5,7 +5,9 @@
 4096자 제한을 고려해 섹션 경계에서 자동 분할한다.
 """
 
+import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from loguru import logger
@@ -94,11 +96,12 @@ def _format_section(section: Section) -> str:
 
 def format_briefing(sections: list[Section], total_collected: int) -> str:
     """전체 브리핑 메시지 생성"""
-    now = datetime.now()
+    tz = ZoneInfo(os.getenv("TIMEZONE", "Asia/Seoul"))
+    now = datetime.now(tz)
     today = now.strftime("%Y-%m-%d (%a)")
     total_selected = sum(len(s.articles) for s in sections)
 
-    # 오전/저녁 구분 (정오 기준)
+    # 오전/저녁 구분 (정오 기준, KST)
     time_label = "아침" if now.hour < 12 else "저녁"
 
     header = (
