@@ -11,7 +11,16 @@ from typing import Optional
 import anthropic
 from loguru import logger
 
+from src import MIN_CONTENT_LENGTH
 from src.collect import Article
+
+
+# ── 본문 미확인 시 프롬프트 앞에 prepend되는 가드 문구 ─────────────
+LOW_CONTENT_GUARD = (
+    "⚠️ 본문이 확보되지 않았다. 제목만 보고 분류하되, "
+    "정당 카테고리(justice_party, allied_parties)나 importance 4-5점은 "
+    "제목에 명시적 근거가 있을 때만 부여하라. 추측 금지.\n\n"
+)
 
 
 # ── 상수 ────────────────────────────────────
@@ -59,11 +68,20 @@ def classify_article(
     """
     template = prompt_template or _load_prompt()
 
+    # 본문 미확인 체크 (제목 + RSS 요약 길이)
+    content_length = len((article.title or "") + (article.summary or ""))
+    is_low_content = content_length < MIN_CONTENT_LENGTH
+
     prompt = template.format(
         title=article.title,
         summary=article.summary or "(요약 없음)",
         source=article.source,
     )
+
+    # 본문이 너무 짧으면 환각 방지용 가드 문구를 앞에 prepend
+    if is_low_content:
+        prompt = LOW_CONTENT_GUARD + prompt
+        article.low_content = True
 
     try:
         response = client.messages.create(

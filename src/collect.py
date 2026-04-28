@@ -43,6 +43,9 @@ class Article:
     ai_summary: str = ""
     ai_comment: str = ""
 
+    # 본문 미확인 플래그 (classify/summarize에서 세팅)
+    low_content: bool = False
+
     def __post_init__(self):
         """URL 해시 자동 생성"""
         if not self.url_hash and self.url:

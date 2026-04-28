@@ -11,7 +11,12 @@ from typing import Optional
 import anthropic
 from loguru import logger
 
+from src import MIN_CONTENT_LENGTH
 from src.collect import Article
+
+
+# ── 본문 미확인 시 사용자 친화 메시지 ─────────────────
+LOW_CONTENT_SUMMARY = "본문을 가져오지 못했습니다. 원문을 직접 확인해 주세요."
 
 
 # ── 상수 ────────────────────────────────────
@@ -56,6 +61,20 @@ def summarize_article(
 
     # 본문이 없으면 RSS 요약문을 사용
     content = article.summary or article.title
+
+    # 본문이 너무 짧으면 Sonnet 호출을 스킵 (환각 방지 + 비용 절감)
+    if len(content) < MIN_CONTENT_LENGTH:
+        article.low_content = True
+        logger.info(
+            f"본문 미확인 — Sonnet 스킵 [{article.title[:30]}] "
+            f"(길이 {len(content)}자)"
+        )
+        return {
+            "summary": LOW_CONTENT_SUMMARY,
+            "comment": "",
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
 
     prompt = template.format(
         title=article.title,

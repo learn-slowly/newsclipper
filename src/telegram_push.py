@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from loguru import logger
 
+from src import LOW_CONTENT_MARKER
 from src.collect import Article
 from src.section_builder import ArticleGroup, Section
 
@@ -29,11 +30,17 @@ def _format_scope(scope: str) -> str:
 
 def _format_article(article: Article) -> str:
     """단일 기사를 텔레그램 메시지 포맷으로 변환"""
-    # 중요도 5점에만 🔥 이모지
-    fire = "🔥 " if article.importance == 5 else ""
+    # 본문 미확인이면 ⚠️, 그게 아니고 중요도 5점이면 🔥
+    if article.low_content:
+        prefix = "⚠️ "
+    elif article.importance == 5:
+        prefix = "🔥 "
+    else:
+        prefix = ""
 
     scope_label = _format_scope(article.scope)
-    line = f"{fire}[{article.importance}|{scope_label}] {article.title}"
+    title_suffix = f" {LOW_CONTENT_MARKER}" if article.low_content else ""
+    line = f"{prefix}[{article.importance}|{scope_label}] {article.title}{title_suffix}"
 
     # AI 코멘트가 있으면 추가
     if article.ai_comment:
@@ -51,10 +58,16 @@ def _format_group(group: ArticleGroup) -> str:
     관련 기사: 출처명 + 링크만 간략히
     """
     primary = group.primary
-    fire = "🔥 " if primary.importance == 5 else ""
+    if primary.low_content:
+        prefix = "⚠️ "
+    elif primary.importance == 5:
+        prefix = "🔥 "
+    else:
+        prefix = ""
     scope_label = _format_scope(primary.scope)
+    title_suffix = f" {LOW_CONTENT_MARKER}" if primary.low_content else ""
 
-    line = f"{fire}[{primary.importance}|{scope_label}] {primary.title}"
+    line = f"{prefix}[{primary.importance}|{scope_label}] {primary.title}{title_suffix}"
 
     if primary.ai_comment:
         line += f"\n   → {primary.ai_comment}"
