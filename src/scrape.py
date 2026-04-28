@@ -7,7 +7,9 @@ RSS가 없는 경남 지역 매체(경남신문, MBC경남, KBS경남, KNN)에�
 
 import html
 import json
+import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
@@ -16,6 +18,7 @@ import httpx
 import yaml
 from loguru import logger
 
+from src import MIN_CONTENT_LENGTH
 from src.collect import Article
 
 
@@ -34,6 +37,14 @@ TAG_RE = re.compile(r"<[^>]+>")
 
 # MBC경남 NewsViewFunc(ID) 패턴
 MBC_ID_RE = re.compile(r"NewsViewFunc\((\d+)\)")
+
+# ── Jina Reader 본문 추출 설정 ─────────────────────
+# 스크래핑 매체(MBC경남·KNN·경남신문 등)는 RSS와 달리 본문이 비어 있으므로
+# Jina Reader(https://r.jina.ai)를 통해 본문을 마크다운으로 가져온다.
+JINA_BASE_URL = "https://r.jina.ai/"
+JINA_TIMEOUT = 15
+JINA_RATE_LIMIT_SLEEP = 0.5      # 호출 사이 sleep (초)
+BODY_TRUNCATE_LENGTH = 500       # Article.summary에 저장할 최대 길이
 
 
 def _clean_title(text: str) -> str:
@@ -225,6 +236,101 @@ def scrape_source(
         return []
 
 
+def fetch_body_via_jina(url: str, client: httpx.Client) -> tuple[str, str]:
+    """Jina Reader로 기사 본문 추출
+
+    Args:
+        url: 원본 기사 URL
+        client: httpx 클라이언트 (재사용)
+
+    Returns:
+        (본문 텍스트, 상태 코드 라벨)
+        - 성공: (본문, "ok")
+        - 429 rate limit: ("", "rate_limit")
+        - 기타 실패: ("", "error")
+    """
+    headers = {"User-Agent": BROWSER_UA, "Accept": "text/plain"}
+
+    # 환경변수에 키가 있으면 추가 (없어도 무료 티어로 동작)
+    api_key = os.getenv("JINA_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    jina_url = f"{JINA_BASE_URL}{url}"
+
+    try:
+        response = client.get(jina_url, headers=headers, timeout=JINA_TIMEOUT)
+
+        if response.status_code == 429:
+            return "", "rate_limit"
+
+        response.raise_for_status()
+        text = response.text
+
+        # "Markdown Content:" 마커 이후만 사용 (앞쪽 메타데이터 제거)
+        # 마커가 없으면 전체 텍스트 사용 (방어적 fallback)
+        marker = "Markdown Content:"
+        idx = text.find(marker)
+        if idx >= 0:
+            body = text[idx + len(marker):].strip()
+        else:
+            body = text.strip()
+
+        return body, "ok"
+
+    except httpx.HTTPStatusError:
+        return "", "error"
+    except httpx.TimeoutException:
+        return "", "error"
+    except Exception:
+        return "", "error"
+
+
+def enrich_articles_with_body(
+    articles: list[Article],
+    client: httpx.Client,
+) -> None:
+    """스크래핑된 Article 리스트의 summary를 Jina Reader 본문으로 채운다.
+
+    in-place로 article.summary를 수정한다.
+    YouTube URL은 영상 본문 추출이 불가능하므로 스킵.
+    본문이 MIN_CONTENT_LENGTH 미만이면 빈 문자열 유지 → 다음 단계 가드가 처리.
+    """
+    for i, article in enumerate(articles):
+        title_short = article.title[:30]
+
+        # YouTube URL 스킵 (KBS경남 채널)
+        if "youtube.com/watch" in article.url or "youtu.be/" in article.url:
+            logger.debug(f"[Jina] YouTube URL 스킵: {title_short}")
+            continue
+
+        body, status = fetch_body_via_jina(article.url, client)
+
+        if status == "rate_limit":
+            logger.warning(
+                f"[Jina] ⏱ rate limit (429) | {article.source} | {title_short}"
+            )
+        elif status == "error":
+            logger.warning(
+                f"[Jina] ✗ fetch 실패 | {article.source} | {title_short}"
+            )
+        elif len(body) >= MIN_CONTENT_LENGTH:
+            article.summary = body[:BODY_TRUNCATE_LENGTH]
+            logger.info(
+                f"[Jina] ✓ {article.source} | {len(body)}자 → "
+                f"{len(article.summary)}자 저장 | {title_short}"
+            )
+        else:
+            logger.warning(
+                f"[Jina] ✗ {article.source} | {len(body)}자 "
+                f"(임계값 {MIN_CONTENT_LENGTH} 미만) | {title_short}"
+            )
+
+        # 마지막 항목 뒤엔 sleep 안 함
+        if i < len(articles) - 1:
+            time.sleep(JINA_RATE_LIMIT_SLEEP)
+
+
 def scrape_all(config_path: Optional[Path] = None) -> list[Article]:
     """모든 스크래핑 대상에서 기사 수집
 
@@ -248,13 +354,21 @@ def scrape_all(config_path: Optional[Path] = None) -> list[Article]:
             articles = scrape_source(source_config, client)
             all_articles.extend(articles)
 
-    # URL 기준 중복 제거
-    seen_urls = set()
-    unique = []
-    for article in all_articles:
-        if article.url not in seen_urls:
-            seen_urls.add(article.url)
-            unique.append(article)
+        # URL 기준 중복 제거
+        seen_urls = set()
+        unique = []
+        for article in all_articles:
+            if article.url not in seen_urls:
+                seen_urls.add(article.url)
+                unique.append(article)
 
-    logger.info(f"스크래핑 전체: {len(all_articles)}건 → 중복 제거 후 {len(unique)}건")
+        logger.info(
+            f"스크래핑 전체: {len(all_articles)}건 → 중복 제거 후 {len(unique)}건"
+        )
+
+        # Jina Reader로 본문 enrich (스크래핑 매체 4곳, RSS 매체는 영향 없음)
+        if unique:
+            logger.info(f"📥 Jina Reader로 본문 fetch 시작 ({len(unique)}건)")
+            enrich_articles_with_body(unique, client)
+
     return unique
