@@ -46,6 +46,11 @@ class Article:
     # 본문 미확인 플래그 (classify/summarize에서 세팅)
     low_content: bool = False
 
+    # 분류 성공 여부 (classify.py에서 세팅)
+    # AI 분류가 실제로 성공하면 True, API/파싱 오류로 기본값 처리되면 False.
+    # 수집 단계 seen 기록 시 성공한 기사만 기록해 장애 기사 복구를 가능하게 한다.
+    classified_ok: bool = False
+
     def __post_init__(self):
         """URL 해시 자동 생성"""
         if not self.url_hash and self.url:

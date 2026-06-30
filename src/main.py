@@ -180,6 +180,16 @@ async def run_pipeline():
         logger.info("⭐ Step 4-c: 신뢰 매체 가산")
         articles = apply_trusted_boost(articles, trusted_sources)
 
+        # 4-d. 분류 성공 기사 seen 기록 (재수집 방지)
+        # 분류에 성공한 기사는 발송 여부와 무관하게 여기서 "이미 봤음"으로 기록한다.
+        # 이렇게 하면 발송이 실패해도 같은 기사를 다음 실행 때 다시 수집하지 않는다.
+        # 단, 크레딧 장애 등으로 분류 실패한 기사(classified_ok=False)는 기록하지 않아
+        # 다음 실행 때 다시 시도할 수 있게 한다(복구 가능).
+        classified_ok = [a for a in articles if a.classified_ok]
+        for article in classified_ok:
+            storage.mark_seen(article.url_hash, article.url, article.title)
+        logger.info(f"💾 Step 4-d: 분류 성공 {len(classified_ok)}건 seen 기록")
+
         # 중요도 1점 제거
         articles = [a for a in articles if a.importance > 1]
         logger.info(f"중요도 2점 이상: {len(articles)}건")
@@ -227,7 +237,9 @@ async def run_pipeline():
         logger.info("💾 Step 8: 실행 기록 저장")
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # 처리한 기사를 seen에 기록
+        # 처리한 기사를 seen에 기록 (안전망)
+        # 대부분 Step 4-d에서 이미 기록됐지만, 분류 실패했어도 가산점으로
+        # 브리핑에 포함돼 발송된 기사를 마저 기록한다. mark_seen은 중복 무시(IGNORE)라 안전하다.
         for article in articles:
             storage.mark_seen(article.url_hash, article.url, article.title)
 

@@ -120,6 +120,7 @@ def classify_article(
             "scope": scope,
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
+            "classified_ok": True,
         }
 
     except json.JSONDecodeError as e:
@@ -130,6 +131,7 @@ def classify_article(
             "scope": FALLBACK_SCOPE,
             "tokens_in": 0,
             "tokens_out": 0,
+            "classified_ok": False,
         }
     except anthropic.APIError as e:
         logger.error(f"Claude API 오류 [{article.title[:30]}]: {e}")
@@ -139,6 +141,7 @@ def classify_article(
             "scope": FALLBACK_SCOPE,
             "tokens_in": 0,
             "tokens_out": 0,
+            "classified_ok": False,
         }
 
 
@@ -167,6 +170,7 @@ def classify_articles(
         article.category = result["category"]
         article.importance = result["importance"]
         article.scope = result["scope"]
+        article.classified_ok = result["classified_ok"]
         total_tokens_in += result["tokens_in"]
         total_tokens_out += result["tokens_out"]
 
