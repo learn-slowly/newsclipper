@@ -7,10 +7,31 @@ sources:
   - name: MBC경남
     url: https://www.mbcgn.kr/01_new/new01_list.asp
     scope: gyeongnam
+    # 서버 응답이 느려 기본 15초로는 자주 타임아웃 → 30초로 늘림
+    timeout: 30
     # onclick="javascript:NewsViewFunc(ID)" 패턴에서 ID 추출
     selector: "a[href*='NewsViewFunc']"
     base_url: https://www.mbcgn.kr
     article_url_template: "https://www.mbcgn.kr/01_new/new01_view.asp?mn_lnk=B&idx={id}"
+
+  # 민중의소리: RSS 폐기(404) → 섹션 페이지 스크래핑으로 전환.
+  # vop.co.kr은 낡은 1024비트 DH 키를 써서 legacy_ssl 필요.
+  # 섹션은 필요에 따라 추가·삭제 가능 (예: /culture, /science)
+  - name: 민중의소리
+    url: https://www.vop.co.kr/society    # 사회
+    scope: national
+    legacy_ssl: true
+    base_url: https://www.vop.co.kr
+  - name: 민중의소리
+    url: https://www.vop.co.kr/politics   # 정치
+    scope: national
+    legacy_ssl: true
+    base_url: https://www.vop.co.kr
+  - name: 민중의소리
+    url: https://www.vop.co.kr/economy    # 경제
+    scope: national
+    legacy_ssl: true
+    base_url: https://www.vop.co.kr
 
   # KBS경남: 봇 접근 완전 차단 — RSS도 없음. 추후 대안 검토
 

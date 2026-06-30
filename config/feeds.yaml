@@ -16,9 +16,7 @@ labor:
   - name: 매일노동뉴스
     url: https://www.labortoday.co.kr/rss/allArticle.xml
     scope: national
-  - name: 민중의소리
-    url: https://www.vop.co.kr/rss/vop_news.xml
-    scope: national
+  # 민중의소리: RSS 폐기(404) → config/scrape.yaml에서 섹션 스크래핑으로 수집
 
 # ── 기후·환경 전문 매체 ──────────────────────────
 climate:

@@ -19,7 +19,7 @@ import yaml
 from loguru import logger
 
 from src import MIN_CONTENT_LENGTH
-from src.collect import Article
+from src.collect import Article, _legacy_ssl_context
 
 
 # ── 설정 ─────────────────────────────────────
@@ -37,6 +37,11 @@ TAG_RE = re.compile(r"<[^>]+>")
 
 # MBC경남 NewsViewFunc(ID) 패턴
 MBC_ID_RE = re.compile(r"NewsViewFunc\((\d+)\)")
+
+# 스크래핑 기본 타임아웃(초). 느린 매체는 scrape.yaml의 timeout 값으로 개별 조정한다.
+DEFAULT_SCRAPE_TIMEOUT = 15
+# 타임아웃 시 재시도 횟수 (느린 서버가 한 번에 응답 못 하는 경우 대비)
+SCRAPE_MAX_ATTEMPTS = 2
 
 # ── Jina Reader 본문 추출 설정 ─────────────────────
 # 스크래핑 매체(MBC경남·KNN·경남신문 등)는 RSS와 달리 본문이 비어 있으므로
@@ -167,6 +172,18 @@ def _extract_links_from_html(html_text: str, source_config: dict) -> list[dict]:
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"[KBS경남] 유튜브 JSON 파싱 실패: {e}")
 
+    elif name == "민중의소리":
+        # 기사 URL: href="/A00001695553.html", 링크 안 텍스트가 제목
+        pattern = r'<a\s+[^>]*href="(/A\d{6,}\.html)"[^>]*>(.*?)</a>'
+        for path, inner in re.findall(pattern, html_text, re.DOTALL):
+            title = _clean_title(inner)
+            if not title or len(title) < 5:
+                continue
+            url = urljoin(base_url, path)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                articles.append({"title": title, "url": url})
+
     else:
         # 기본: href에서 링크 추출
         pattern = r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
@@ -198,42 +215,71 @@ def scrape_source(
     name = source_config["name"]
     url = source_config["url"]
     scope = source_config.get("scope", "gyeongnam")
+    # 매체별 타임아웃 (scrape.yaml에 timeout 지정 시 우선, 없으면 기본값)
+    timeout = source_config.get("timeout", DEFAULT_SCRAPE_TIMEOUT)
+    # 낡은 SSL을 쓰는 서버(예: 민중의소리)는 보안 레벨 낮춘 전용 컨텍스트로 요청
+    legacy_ssl = source_config.get("legacy_ssl", False)
 
-    try:
-        if client:
-            response = client.get(url, timeout=15)
-        else:
-            response = httpx.get(
-                url,
-                timeout=15,
-                follow_redirects=True,
-                headers={"User-Agent": BROWSER_UA},
+    # 타임아웃은 일시적일 수 있으므로 SCRAPE_MAX_ATTEMPTS회까지 재시도한다.
+    # HTTP 오류·파싱 오류 등은 재시도해도 같으므로 즉시 중단한다.
+    for attempt in range(1, SCRAPE_MAX_ATTEMPTS + 1):
+        try:
+            if legacy_ssl:
+                # 공용 client는 기본 SSL이라 거부당하므로 전용 컨텍스트로 직접 요청
+                response = httpx.get(
+                    url,
+                    timeout=timeout,
+                    follow_redirects=True,
+                    headers={"User-Agent": BROWSER_UA},
+                    verify=_legacy_ssl_context(),
+                )
+            elif client:
+                response = client.get(url, timeout=timeout)
+            else:
+                response = httpx.get(
+                    url,
+                    timeout=timeout,
+                    follow_redirects=True,
+                    headers={"User-Agent": BROWSER_UA},
+                )
+
+            response.raise_for_status()
+            html = response.text
+
+            raw_articles = _extract_links_from_html(html, source_config)
+
+            articles = []
+            for raw in raw_articles:
+                article = Article(
+                    title=raw["title"],
+                    url=raw["url"],
+                    source=name,
+                )
+                articles.append(article)
+
+            logger.info(f"[{name}] 스크래핑 {len(articles)}건 수집")
+            return articles
+
+        except httpx.TimeoutException:
+            if attempt < SCRAPE_MAX_ATTEMPTS:
+                logger.warning(
+                    f"[{name}] 타임아웃 (시도 {attempt}/{SCRAPE_MAX_ATTEMPTS}, "
+                    f"{timeout}초) — 재시도"
+                )
+                continue
+            logger.warning(
+                f"[{name}] 스크래핑 실패: 타임아웃 {SCRAPE_MAX_ATTEMPTS}회 ({timeout}초)"
             )
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"[{name}] HTTP 오류 {e.response.status_code}: {url}")
+            return []
+        except Exception as e:
+            # 하나 실패해도 전체 파이프라인은 계속 (graceful degradation)
+            logger.warning(f"[{name}] 스크래핑 실패: {e}")
+            return []
 
-        response.raise_for_status()
-        html = response.text
-
-        raw_articles = _extract_links_from_html(html, source_config)
-
-        articles = []
-        for raw in raw_articles:
-            article = Article(
-                title=raw["title"],
-                url=raw["url"],
-                source=name,
-            )
-            articles.append(article)
-
-        logger.info(f"[{name}] 스크래핑 {len(articles)}건 수집")
-        return articles
-
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"[{name}] HTTP 오류 {e.response.status_code}: {url}")
-        return []
-    except Exception as e:
-        # 하나 실패해도 전체 파이프라인은 계속 (graceful degradation)
-        logger.warning(f"[{name}] 스크래핑 실패: {e}")
-        return []
+    return []
 
 
 def fetch_body_via_jina(url: str, client: httpx.Client) -> tuple[str, str]:

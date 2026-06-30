@@ -6,8 +6,10 @@ config/feeds.yaml에 정의된 RSS 피드에서 최근 24시간 내 뉴스를 �
 
 import hashlib
 import re
+import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +17,20 @@ import feedparser
 import httpx
 import yaml
 from loguru import logger
+
+
+@lru_cache(maxsize=1)
+def _legacy_ssl_context() -> ssl.SSLContext:
+    """구형 서버용 SSL 컨텍스트 (보안 레벨 1)
+
+    민중의소리(vop.co.kr)처럼 낡은 1024비트 DH 키를 쓰는 서버는
+    최신 OpenSSL이 'DH_KEY_TOO_SMALL' 오류로 연결을 거부한다.
+    보안 레벨을 1로 낮춰 이 서버에 한해 연결을 허용한다.
+    (feeds.yaml에서 legacy_ssl: true 로 지정한 피드에만 사용)
+    """
+    ctx = ssl.create_default_context()
+    ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+    return ctx
 
 
 @dataclass
@@ -133,7 +149,18 @@ def collect_from_feed(
     articles = []
 
     try:
-        if client:
+        if feed_config.get("legacy_ssl"):
+            # 낡은 SSL을 쓰는 구형 서버(예: 민중의소리)는 보안 레벨을 낮춘
+            # 전용 컨텍스트로 직접 요청한다. 공용 client는 기본 SSL이라 거부당한다.
+            response = httpx.get(
+                url,
+                timeout=15,
+                follow_redirects=True,
+                headers={"User-Agent": "clipboard055/1.0"},
+                verify=_legacy_ssl_context(),
+            )
+            content = response.content
+        elif client:
             response = client.get(url, timeout=15)
             content = response.content
         else:
