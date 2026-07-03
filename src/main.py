@@ -78,6 +78,22 @@ def calculate_cost(
     )
 
 
+# ── 분류 전멸 감지 ────────────────────────────────
+def build_classify_failure_alert(total: int, ok: int) -> str | None:
+    """분류 성공이 0건이면 관리자 경고 메시지를 만든다. 정상이면 None.
+
+    크레딧 소진·API 장애 시 모든 기사가 분류 실패 → 브리핑이 조용히 누락된다.
+    이때 관리자에게 DM으로 알려야 장애를 바로 알아챌 수 있다 (2026-07-02 사고 교훈).
+    """
+    if total > 0 and ok == 0:
+        return (
+            f"AI 분류 전멸: 기사 {total}건이 모두 분류에 실패했습니다.\n"
+            "크레딧 소진 또는 Anthropic API 장애가 의심됩니다.\n"
+            "console.anthropic.com → Billing에서 크레딧 잔액을 확인하세요."
+        )
+    return None
+
+
 # ── 메인 파이프라인 ──────────────────────────────
 async def run_pipeline():
     """브리핑 파이프라인 실행"""
@@ -189,6 +205,17 @@ async def run_pipeline():
         for article in classified_ok:
             storage.mark_seen(article.url_hash, article.url, article.title)
         logger.info(f"💾 Step 4-d: 분류 성공 {len(classified_ok)}건 seen 기록")
+
+        # 4-e. 분류 전멸 감지 → 관리자 경고 DM
+        # 전부 실패면 아래 단계를 진행해도 발송할 게 없으므로 여기서 알리고 종료한다.
+        failure_alert = build_classify_failure_alert(
+            total=len(articles), ok=len(classified_ok)
+        )
+        if failure_alert:
+            logger.error(failure_alert)
+            if admin_id:
+                await send_error_alert(failure_alert, bot_token, admin_id)
+            return
 
         # 중요도 1점 제거
         articles = [a for a in articles if a.importance > 1]
