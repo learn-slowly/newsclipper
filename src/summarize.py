@@ -20,7 +20,7 @@ LOW_CONTENT_SUMMARY = "본문을 가져오지 못했습니다. 원문을 직접 
 
 
 # ── 상수 ────────────────────────────────────
-SONNET_MODEL = "claude-4-sonnet-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 # 요약 프롬프트 파일 경로
 PROMPT_PATH = Path(__file__).parent / "prompts" / "summarize.txt"
