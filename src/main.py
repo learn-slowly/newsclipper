@@ -239,9 +239,15 @@ async def run_pipeline():
         if cost > DAILY_COST_WARNING:
             logger.warning(f"⚠️ 일일 비용 경고! ${cost:.4f} > ${DAILY_COST_WARNING}")
 
-        # 6. 섹션 구성 (Phase 1: 5개 섹션)
+        # 6. 섹션 구성 (Phase 1 활성 섹션, 발송 기준은 keywords.yaml의 min_importance)
         logger.info("📋 Step 6: 섹션 구성")
-        sections = build_sections(articles, active_sections=PHASE1_ACTIVE)
+        from src.keyword_boost import load_keywords
+        from src.section_builder import DEFAULT_MIN_IMPORTANCE
+        min_importance = load_keywords().get("min_importance", DEFAULT_MIN_IMPORTANCE)
+        logger.info(f"발송 기준: 중요도 {min_importance}점 이상")
+        sections = build_sections(
+            articles, active_sections=PHASE1_ACTIVE, min_importance=min_importance
+        )
 
         if not sections:
             logger.info("활성 섹션에 배치된 기사가 없습니다")

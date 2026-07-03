@@ -67,27 +67,35 @@ SECTION_DEFS = [
     (6, "경남 지역 정치·선거", "🗳", "regional_politics", "gyeongnam"),
     (7, "정의당 — 경남", "🟡", "justice_party", "gyeongnam"),
     (8, "정의당 — 전국", "🟨", "justice_party", "national"),
-    (9, "노동당·녹색당 동향", "🤝🌿", "allied_parties", None),
+    (9, "노동당·녹색당·진보당 동향", "🤝🌿", "allied_parties", None),
 ]
 
-# Phase 1 활성화 섹션 번호
-PHASE1_ACTIVE = {1, 2, 6, 7, 8}
+# Phase 1 활성화 섹션 번호 (2026-07-03: 연대정당 섹션 9 활성화)
+PHASE1_ACTIVE = {1, 2, 6, 7, 8, 9}
+
+# 발송 기준 중요도 기본값 (keywords.yaml의 min_importance로 재정의 가능)
+DEFAULT_MIN_IMPORTANCE = 4
 
 
 def build_sections(
     articles: list[Article],
     active_sections: set[int] | None = None,
+    min_importance: int = DEFAULT_MIN_IMPORTANCE,
 ) -> list[Section]:
     """기사를 섹션별로 분류
 
     Args:
         articles: 분류 완료된 기사 리스트
         active_sections: 활성화할 섹션 번호 (None이면 전체)
+        min_importance: 이 점수 이상만 섹션에 포함 (분량 폭주 방지)
 
     Returns:
         기사가 있는 섹션만 반환 (빈 섹션은 생략)
     """
     active = active_sections if active_sections is not None else set(range(1, 10))
+
+    # 발송 기준 미달 기사 제외
+    articles = [a for a in articles if a.importance >= min_importance]
 
     sections = []
 
