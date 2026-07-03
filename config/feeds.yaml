@@ -109,3 +109,12 @@ google_alerts_topic:
     url: https://www.google.com/alerts/feeds/04635537994527682223/3283329136707790681
     scope: gyeongnam
     trusted: false
+  # 2026-07-03: 정의당 전용 수집원 추가 (공식 RSS 없음 — 알리미로 대체)
+  - name: 구글알리미-정의당
+    url: https://www.google.com/alerts/feeds/04635537994527682223/8078792035301753755
+    scope: national
+    trusted: false
+  - name: 구글알리미-정의당경남
+    url: https://www.google.com/alerts/feeds/04635537994527682223/760594549504925080
+    scope: gyeongnam
+    trusted: false
