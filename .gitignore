@@ -18,6 +18,7 @@ venv/
 # 로그
 logs/*.log
 logs/*.json
+logs/*.md
 
 # IDE
 .vscode/

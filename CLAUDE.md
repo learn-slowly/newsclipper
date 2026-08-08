@@ -38,8 +38,8 @@
 - 스크래핑 시 `robots.txt`를 확인하고 준수한다
 
 ### 3. 비용 관리 (중요)
-- Haiku와 Sonnet 호출 시 **토큰 사용량을 반드시 로그로 남긴다**
-- `briefings` 테이블의 `haiku_tokens_in/out`, `sonnet_tokens_in/out`, `estimated_cost_usd`에 기록
+- 분류(Luna)와 요약(Sonnet) 호출 시 **토큰 사용량을 반드시 로그로 남긴다**
+- `briefings` 테이블의 `haiku_tokens_in/out`(컬럼명은 초기 스키마 유지 — 내용물은 분류 모델 토큰), `sonnet_tokens_in/out`, `estimated_cost_usd`에 기록
 - 일일 비용이 $1.5 초과하면 경고 로그 출력
 - 월 비용이 $30 초과 예상 시: Sonnet 요약 기준을 중요도 4점 이상으로 자동 상향
 
@@ -69,7 +69,7 @@ clipboard055/
 │   ├── main.py           # 파이프라인 오케스트레이션
 │   ├── collect.py        # RSS 수집
 │   ├── dedupe.py         # 중복 제거
-│   ├── classify.py       # Haiku 분류 (9 카테고리)
+│   ├── classify.py       # Luna 분류 (9 카테고리)
 │   ├── summarize.py      # Sonnet 요약
 │   ├── section_builder.py # 9개 섹션 구성
 │   ├── telegram_push.py  # 텔레그램 발송
@@ -133,7 +133,7 @@ clipboard055/
 
 ## AI 프롬프트 규칙
 
-### Haiku 분류 프롬프트
+### 분류 프롬프트 (Luna)
 - `src/prompts/classify.txt`에 별도 파일로 저장
 - 응답은 **반드시 JSON만** 요청
 - 응답 파싱 실패 시: 해당 기사는 `category="other", importance=1`로 처리하고 로그
