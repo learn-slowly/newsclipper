@@ -2,28 +2,31 @@
 
 분류 성공/실패에 따라 classified_ok 플래그가 올바르게 세팅되는지 검증한다.
 이 플래그는 수집 단계 seen 기록(재수집 방지 + 장애 기사 복구)의 기준이 되므로 중요하다.
-Claude API 호출은 모두 모킹한다 — 실제 호출 금지(CLAUDE.md 규칙).
+OpenAI API 호출은 모두 모킹한다 — 실제 호출 금지(CLAUDE.md 규칙).
 """
 
 from unittest.mock import MagicMock
 
-import anthropic
+import httpx
 
 from src.classify import classify_article
 from src.collect import Article
 
 
 def _make_client(text: str = None, raise_exc: Exception = None) -> MagicMock:
-    """Anthropic 클라이언트 모킹 헬퍼"""
+    """OpenAI용 httpx 클라이언트 모킹 헬퍼"""
     client = MagicMock()
     if raise_exc is not None:
-        client.messages.create.side_effect = raise_exc
+        client.post.side_effect = raise_exc
     else:
         resp = MagicMock()
-        resp.content = [MagicMock(text=text)]
-        resp.usage.input_tokens = 10
-        resp.usage.output_tokens = 5
-        client.messages.create.return_value = resp
+        resp.status_code = 200
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {
+            "choices": [{"message": {"content": text}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        client.post.return_value = resp
     return client
 
 
@@ -55,14 +58,25 @@ def test_분류_성공시_classified_ok_True():
 
 def test_API_오류시_classified_ok_False():
     """크레딧 소진 등 API 오류면 classified_ok=False (재시도 대상)"""
-    api_err = anthropic.APIError(
-        message="credit too low", request=MagicMock(), body=None
-    )
-    client = _make_client(raise_exc=api_err)
+    client = _make_client(raise_exc=httpx.ConnectError("connection failed"))
     result = classify_article(_make_article(), client, _TEMPLATE)
 
     assert result["classified_ok"] is False
     assert result["importance"] == 1  # FALLBACK_IMPORTANCE
+
+
+def test_HTTP_오류시_classified_ok_False():
+    """서버가 오류 코드를 돌려주면 classified_ok=False"""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 429
+    resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "rate limited", request=MagicMock(), response=MagicMock(status_code=429)
+    )
+    client.post.return_value = resp
+    result = classify_article(_make_article(), client, _TEMPLATE)
+
+    assert result["classified_ok"] is False
 
 
 def test_JSON_파싱_실패시_classified_ok_False():

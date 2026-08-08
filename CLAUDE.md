@@ -16,9 +16,9 @@
 
 - **언어**: Python 3.11
 - **패키지 관리**: uv (선호) 또는 poetry
-- **AI**: Anthropic Claude API
-  - **Haiku 4.5** — 1차 분류 (카테고리·중요도·스코프)
-  - **Sonnet 4.6** — 2차 요약·코멘트 생성 (필터링 통과 기사만)
+- **AI**: 2단계 구조 (싼 모델로 거르고, 좋은 모델로 요약)
+  - **GPT-5.6 Luna** (OpenAI) — 1차 분류 (카테고리·중요도·스코프) — 2026-08-08 Haiku에서 교체
+  - **Sonnet 4.6** (Anthropic) — 2차 요약·코멘트 생성 (필터링 통과 기사만)
 - **저장소**: SQLite
 - **발송**: python-telegram-bot, Resend (이메일)
 - **스케줄링**: GitHub Actions cron

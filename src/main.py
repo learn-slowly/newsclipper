@@ -5,7 +5,7 @@ clipboard055 메인 파이프라인
 1. RSS 수집 (collect)
 2. DB 중복 제거 (dedupe - seen 테이블)
 3. 제목 유사도 중복 제거 (dedupe - 유사 제목)
-4. 1차 분류 (classify - Haiku)
+4. 1차 분류 (classify - GPT-5.6 Luna)
 5. 2차 요약 (summarize - Sonnet, 중요도 3점 이상)
 6. 섹션 구성 (section_builder)
 7. 텔레그램 발송 (telegram_push)
@@ -54,11 +54,12 @@ def setup_logger():
     )
 
 
-# ── 비용 계산 ──────────��──────────────────────
-# Haiku: 입력 $0.80/M, 출력 $4.00/M
-# Sonnet: 입력 $3.00/M, 출력 $15.00/M
-HAIKU_INPUT_COST_PER_TOKEN = 0.80 / 1_000_000
-HAIKU_OUTPUT_COST_PER_TOKEN = 4.00 / 1_000_000
+# ── 비용 계산 ─────────────────────────────────
+# 분류 Luna: 입력 $0.20/M, 출력 $1.20/M (2026-08-08 공식 단가)
+# 요약 Sonnet 4.6: 입력 $3.00/M, 출력 $15.00/M
+# ※ 이전 단가표는 은퇴한 Haiku 3.5 값($0.80/$4.00)이어서 실청구보다 20% 낮게 기록됐었다
+LUNA_INPUT_COST_PER_TOKEN = 0.20 / 1_000_000
+LUNA_OUTPUT_COST_PER_TOKEN = 1.20 / 1_000_000
 SONNET_INPUT_COST_PER_TOKEN = 3.00 / 1_000_000
 SONNET_OUTPUT_COST_PER_TOKEN = 15.00 / 1_000_000
 
@@ -67,12 +68,12 @@ DAILY_COST_WARNING = 1.5
 
 
 def calculate_cost(
-    haiku_in: int, haiku_out: int, sonnet_in: int, sonnet_out: int
+    classify_in: int, classify_out: int, sonnet_in: int, sonnet_out: int
 ) -> float:
     """토큰 사용량에서 비용 계산 (USD)"""
     return (
-        haiku_in * HAIKU_INPUT_COST_PER_TOKEN
-        + haiku_out * HAIKU_OUTPUT_COST_PER_TOKEN
+        classify_in * LUNA_INPUT_COST_PER_TOKEN
+        + classify_out * LUNA_OUTPUT_COST_PER_TOKEN
         + sonnet_in * SONNET_INPUT_COST_PER_TOKEN
         + sonnet_out * SONNET_OUTPUT_COST_PER_TOKEN
     )
@@ -88,8 +89,8 @@ def build_classify_failure_alert(total: int, ok: int) -> str | None:
     if total > 0 and ok == 0:
         return (
             f"AI 분류 전멸: 기사 {total}건이 모두 분류에 실패했습니다.\n"
-            "크레딧 소진 또는 Anthropic API 장애가 의심됩니다.\n"
-            "console.anthropic.com → Billing에서 크레딧 잔액을 확인하세요."
+            "크레딧 소진 또는 OpenAI API 장애가 의심됩니다.\n"
+            "platform.openai.com → Billing에서 크레딧 잔액을 확인하세요."
         )
     return None
 
@@ -108,12 +109,16 @@ async def run_pipeline():
     load_dotenv()
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
     admin_id = os.getenv("TELEGRAM_ADMIN_USER_ID", "")
 
     if not api_key:
-        logger.error("ANTHROPIC_API_KEY가 설정되지 않았습니다")
+        logger.error("ANTHROPIC_API_KEY가 설정되지 않았습니다 (요약용)")
+        sys.exit(1)
+    if not openai_key:
+        logger.error("OPENAI_API_KEY가 설정되지 않았습니다 (분류용)")
         sys.exit(1)
     if not bot_token or not channel_id:
         logger.error("TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHANNEL_ID가 설정되지 않았습니다")
@@ -184,9 +189,9 @@ async def run_pipeline():
             logger.info("키워드 필터 후 기사가 없습니다")
             return
 
-        # 4. 1차 분류 (Haiku)
-        logger.info("🏷️ Step 4: AI 분류 (Haiku)")
-        articles, haiku_in, haiku_out = classify_articles(articles, api_key)
+        # 4. 1차 분류 (GPT-5.6 Luna)
+        logger.info("🏷️ Step 4: AI 분류 (Luna)")
+        articles, classify_in, classify_out = classify_articles(articles, openai_key)
 
         # 4-b. 키워드 교차 매칭 가산 (지역명 × 카테고리 키워드)
         logger.info("🔍 Step 4-b: 키워드 교차 매칭 가산")
@@ -233,7 +238,7 @@ async def run_pipeline():
         )
 
         # 비용 계산
-        cost = calculate_cost(haiku_in, haiku_out, sonnet_in, sonnet_out)
+        cost = calculate_cost(classify_in, classify_out, sonnet_in, sonnet_out)
         logger.info(f"💰 오늘 비용: ${cost:.4f}")
 
         if cost > DAILY_COST_WARNING:
@@ -284,8 +289,9 @@ async def run_pipeline():
             date=today,
             article_count=len(articles),
             sent_telegram=sent,
-            haiku_tokens_in=haiku_in,
-            haiku_tokens_out=haiku_out,
+            # DB 컬럼명은 초기 스키마(haiku_*) 유지 — 내용물은 분류 모델(Luna) 토큰
+            haiku_tokens_in=classify_in,
+            haiku_tokens_out=classify_out,
             sonnet_tokens_in=sonnet_in,
             sonnet_tokens_out=sonnet_out,
             estimated_cost_usd=cost,

@@ -1,14 +1,16 @@
 """
-1차 분류 모듈 (Claude Haiku)
+1차 분류 모듈 (OpenAI GPT-5.6 Luna)
 
-기사 제목+요약을 Haiku에 넘겨서 카테고리·중요도·스코프를 분류한다.
+기사 제목+요약을 Luna에 넘겨서 카테고리·중요도·스코프를 분류한다.
+2026-08-08: Claude Haiku → GPT-5.6 Luna로 교체 (비교 시험 후 결정, 분류비 약 1/4).
+프롬프트와 검증 규칙은 Haiku 시절 그대로 유지한다.
 """
 
 import json
 from pathlib import Path
 from typing import Optional
 
-import anthropic
+import httpx
 from loguru import logger
 
 from src import MIN_CONTENT_LENGTH
@@ -24,7 +26,11 @@ LOW_CONTENT_GUARD = (
 
 
 # ── 상수 ────────────────────────────────────
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
+LUNA_MODEL = "gpt-5.6-luna"
+OPENAI_BASE_URL = "https://api.openai.com"
+
+# 응답은 JSON 한 줄이지만 모델 내부 추론 토큰 여유분을 포함해 넉넉히 잡는다
+MAX_COMPLETION_TOKENS = 2000
 
 # 분류 프롬프트 파일 경로
 PROMPT_PATH = Path(__file__).parent / "prompts" / "classify.txt"
@@ -43,6 +49,15 @@ FALLBACK_CATEGORY = "other"
 FALLBACK_IMPORTANCE = 1
 FALLBACK_SCOPE = "national"
 
+_FALLBACK_RESULT = {
+    "category": FALLBACK_CATEGORY,
+    "importance": FALLBACK_IMPORTANCE,
+    "scope": FALLBACK_SCOPE,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "classified_ok": False,
+}
+
 
 def _load_prompt() -> str:
     """분류 프롬프트 텍스트 로드"""
@@ -52,19 +67,19 @@ def _load_prompt() -> str:
 
 def classify_article(
     article: Article,
-    client: anthropic.Anthropic,
+    client: httpx.Client,
     prompt_template: Optional[str] = None,
 ) -> dict:
     """단일 기사 분류
 
     Args:
         article: 분류할 기사
-        client: Anthropic 클라이언트
+        client: OpenAI용 httpx 클라이언트 (base_url·인증 헤더 설정 완료 상태)
         prompt_template: 프롬프트 템플릿 (테스트용, 없으면 파일에서 로드)
 
     Returns:
         {"category": str, "importance": int, "scope": str,
-         "tokens_in": int, "tokens_out": int}
+         "tokens_in": int, "tokens_out": int, "classified_ok": bool}
     """
     template = prompt_template or _load_prompt()
 
@@ -83,19 +98,30 @@ def classify_article(
         prompt = LOW_CONTENT_GUARD + prompt
         article.low_content = True
 
+    body = {
+        "model": LUNA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+        # 분류엔 깊은 추론이 필요 없어 최소로 (속도·비용 절약)
+        "reasoning_effort": "minimal",
+    }
+
     try:
-        response = client.messages.create(
-            model=HAIKU_MODEL,
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = client.post("/v1/chat/completions", json=body)
+        if response.status_code == 400 and "reasoning_effort" in body:
+            # 파라미터 미지원 모델로 바뀌었을 때를 대비한 안전장치
+            body.pop("reasoning_effort")
+            response = client.post("/v1/chat/completions", json=body)
+        response.raise_for_status()
+        data = response.json()
 
         # 토큰 사용량
-        tokens_in = response.usage.input_tokens
-        tokens_out = response.usage.output_tokens
+        usage = data.get("usage", {})
+        tokens_in = usage.get("prompt_tokens", 0)
+        tokens_out = usage.get("completion_tokens", 0)
 
         # JSON 파싱 (```json 코드 블록 제거)
-        text = response.content[0].text.strip()
+        text = data["choices"][0]["message"]["content"].strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json.loads(text)
@@ -123,26 +149,12 @@ def classify_article(
             "classified_ok": True,
         }
 
-    except json.JSONDecodeError as e:
-        logger.warning(f"분류 JSON 파싱 실패 [{article.title[:30]}]: {e}")
-        return {
-            "category": FALLBACK_CATEGORY,
-            "importance": FALLBACK_IMPORTANCE,
-            "scope": FALLBACK_SCOPE,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "classified_ok": False,
-        }
-    except anthropic.APIError as e:
-        logger.error(f"Claude API 오류 [{article.title[:30]}]: {e}")
-        return {
-            "category": FALLBACK_CATEGORY,
-            "importance": FALLBACK_IMPORTANCE,
-            "scope": FALLBACK_SCOPE,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "classified_ok": False,
-        }
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        logger.warning(f"분류 응답 파싱 실패 [{article.title[:30]}]: {e}")
+        return dict(_FALLBACK_RESULT)
+    except httpx.HTTPError as e:
+        logger.error(f"OpenAI API 오류 [{article.title[:30]}]: {e}")
+        return dict(_FALLBACK_RESULT)
 
 
 def classify_articles(
@@ -153,26 +165,30 @@ def classify_articles(
 
     Args:
         articles: 분류할 기사 리스트
-        api_key: Anthropic API 키
+        api_key: OpenAI API 키
 
     Returns:
         (분류된 기사 리스트, 총 입력 토큰, 총 출력 토큰)
     """
-    client = anthropic.Anthropic(api_key=api_key)
     prompt_template = _load_prompt()
 
     total_tokens_in = 0
     total_tokens_out = 0
 
-    for article in articles:
-        result = classify_article(article, client, prompt_template)
+    with httpx.Client(
+        base_url=OPENAI_BASE_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=60,
+    ) as client:
+        for article in articles:
+            result = classify_article(article, client, prompt_template)
 
-        article.category = result["category"]
-        article.importance = result["importance"]
-        article.scope = result["scope"]
-        article.classified_ok = result["classified_ok"]
-        total_tokens_in += result["tokens_in"]
-        total_tokens_out += result["tokens_out"]
+            article.category = result["category"]
+            article.importance = result["importance"]
+            article.scope = result["scope"]
+            article.classified_ok = result["classified_ok"]
+            total_tokens_in += result["tokens_in"]
+            total_tokens_out += result["tokens_out"]
 
     # 통계 로그
     category_counts = {}
