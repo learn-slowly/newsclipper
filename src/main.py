@@ -23,10 +23,10 @@ from loguru import logger
 
 from src.collect import Article, collect_all, load_feeds
 from src.classify import classify_articles
-from src.keyword_boost import apply_keyword_boost, apply_trusted_boost, prefilter_articles
+from src.keyword_boost import apply_keyword_boost, apply_trusted_boost, load_keywords, prefilter_articles
 from src.scrape import scrape_all
 from src.dedupe import deduplicate_similar, filter_seen
-from src.section_builder import PHASE1_ACTIVE, build_sections
+from src.section_builder import DEFAULT_MIN_IMPORTANCE, PHASE1_ACTIVE, build_sections, is_sendable
 from src.storage import Storage
 from src.summarize import summarize_articles
 from src.telegram_push import format_briefing, send_error_alert, send_telegram
@@ -230,12 +230,19 @@ async def run_pipeline():
             logger.info("관련성 높은 기사가 없습니다")
             return
 
-        # 5. 2차 요약 (Sonnet)
+        # 5. 2차 요약 (Sonnet) — 발송 대상만 요약 (비용 절감)
+        # 꺼진 섹션(여성·청년·복지)과 other 기사는 요약하지 않는다.
+        # 기준은 Step 6의 섹션 구성과 같다(중요도 + 활성 섹션 + 지역 범위).
         logger.info("📝 Step 5: AI 요약 (Sonnet)")
+        min_importance = load_keywords().get("min_importance", DEFAULT_MIN_IMPORTANCE)
+        sendable = [a for a in articles if is_sendable(a, active_sections=PHASE1_ACTIVE, min_importance=min_importance)]
+        logger.info(f"요약 대상: {len(sendable)}건 (발송 가능 기사만)")
         monthly_cost = storage.get_monthly_cost()
-        articles, sonnet_in, sonnet_out = summarize_articles(
-            articles, api_key, monthly_cost
+        _summarized, sonnet_in, sonnet_out = summarize_articles(
+            sendable, api_key, monthly_cost
         )
+        # summarize_articles가 전달한 리스트의 기사를 그대로 바꾸므로,
+        # 원본 articles에 요약 결과가 반영된다. 반환 리스트는 무시한다.
 
         # 비용 계산
         cost = calculate_cost(classify_in, classify_out, sonnet_in, sonnet_out)
@@ -244,11 +251,8 @@ async def run_pipeline():
         if cost > DAILY_COST_WARNING:
             logger.warning(f"⚠️ 일일 비용 경고! ${cost:.4f} > ${DAILY_COST_WARNING}")
 
-        # 6. 섹션 구성 (Phase 1 활성 섹션, 발송 기준은 keywords.yaml의 min_importance)
+        # 6. 섹션 구성 (발송 기준은 위에서 이미 읽은 min_importance 재사용)
         logger.info("📋 Step 6: 섹션 구성")
-        from src.keyword_boost import load_keywords
-        from src.section_builder import DEFAULT_MIN_IMPORTANCE
-        min_importance = load_keywords().get("min_importance", DEFAULT_MIN_IMPORTANCE)
         logger.info(f"발송 기준: 중요도 {min_importance}점 이상")
         sections = build_sections(
             articles, active_sections=PHASE1_ACTIVE, min_importance=min_importance

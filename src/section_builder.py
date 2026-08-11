@@ -77,6 +77,54 @@ PHASE1_ACTIVE = {1, 2, 6, 7, 8, 9}
 DEFAULT_MIN_IMPORTANCE = 4
 
 
+def _matches_section(article: Article, category: str, scope_filter: str | None) -> bool:
+    """기사가 이 섹션에 들어가는 기사인지 판정 (카테고리 + 지역 범위)
+
+    섹션 배치 규칙은 이 함수 한 곳에만 둔다.
+    build_sections(발송)와 is_sendable(요약 대상 판정)이 같은 기준을 쓰게 하기 위함이다.
+    """
+    if article.category != category:
+        return False
+    if scope_filter == "gyeongnam":
+        # 경남 또는 both만
+        return article.scope in ("gyeongnam", "both")
+    if scope_filter == "national":
+        # 전국만 (both 제외 — both는 경남 섹션에서 다룸)
+        return article.scope == "national"
+    # None이면 스코프 필터 없음 (전국+지역 모두 포함)
+    return True
+
+
+def is_sendable(
+    article: Article,
+    active_sections: set[int] | None = None,
+    min_importance: int = DEFAULT_MIN_IMPORTANCE,
+) -> bool:
+    """이 기사가 실제로 브리핑에 실릴 기사인지 판정
+
+    요약(Sonnet) 단계에서 이 판정을 먼저 해서, 발송되지 않을 기사에는
+    요약 비용을 쓰지 않는다. 꺼진 섹션(여성·청년·복지)과 other 기사가
+    여기서 걸러진다.
+
+    Args:
+        article: 분류·가산까지 끝난 기사
+        active_sections: 활성화된 섹션 번호 (None이면 전체)
+        min_importance: 발송 기준 중요도
+
+    Returns:
+        활성 섹션 중 하나에 배치되면 True
+    """
+    if article.importance < min_importance:
+        return False
+
+    active = active_sections if active_sections is not None else set(range(1, 10))
+
+    return any(
+        number in active and _matches_section(article, category, scope_filter)
+        for number, _name, _emoji, category, scope_filter in SECTION_DEFS
+    )
+
+
 def build_sections(
     articles: list[Article],
     active_sections: set[int] | None = None,
@@ -103,17 +151,8 @@ def build_sections(
         if number not in active:
             continue
 
-        # 카테고리 매칭
-        matched = [a for a in articles if a.category == category]
-
-        # 스코프 필터 적용
-        if scope_filter == "gyeongnam":
-            # 경남 또는 both만
-            matched = [a for a in matched if a.scope in ("gyeongnam", "both")]
-        elif scope_filter == "national":
-            # 전국만 (both 제외 — both는 경남 섹션에서 다룸)
-            matched = [a for a in matched if a.scope == "national"]
-        # None이면 스코프 필터 없음 (전국+지역 모두 포함)
+        # 카테고리 + 스코프 매칭
+        matched = [a for a in articles if _matches_section(a, category, scope_filter)]
 
         # 중요도 높은 순 정렬
         matched.sort(key=lambda a: a.importance, reverse=True)

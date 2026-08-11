@@ -6,7 +6,7 @@
 """
 
 from src.collect import Article
-from src.section_builder import PHASE1_ACTIVE, build_sections
+from src.section_builder import PHASE1_ACTIVE, build_sections, is_sendable
 
 
 def _article(title: str, category: str, importance: int, scope: str = "national") -> Article:
@@ -48,3 +48,35 @@ def test_연대정당_섹션_활성화():
     assert len(sections) == 1
     assert sections[0].number == 9
     assert "진보당" in sections[0].name
+
+
+
+def test_발송_불가_기사는_요약_대상에서_제외():
+    """is_sendable — 꺼진 섹션·점수 미달·other는 요약하지 않는다 (비용 절감)
+
+    요약(Sonnet) 단계에서 build_sections와 같은 기준으로 걸러내는지 검증한다.
+    꺼진 섹션(3·4·5) 기사는 점수가 높아도 False → 요약 비용 절약.
+    """
+    # 활성 섹션(labor) 4점 → True
+    a_labor = _article("노동 기사", "labor", 4, "national")
+    assert is_sendable(a_labor, active_sections=PHASE1_ACTIVE, min_importance=4)
+
+    # 꺼진 섹션(gender_minority) 5점 → False (요약 안 함)
+    a_gender = _article("여성 기사", "gender_minority", 5, "national")
+    assert not is_sendable(a_gender, active_sections=PHASE1_ACTIVE, min_importance=4)
+
+    # 점수 미달(labor 3점) → False
+    a_low = _article("덜 중요 노동", "labor", 3, "national")
+    assert not is_sendable(a_low, active_sections=PHASE1_ACTIVE, min_importance=4)
+
+    # other 카테고리 4점 → 어떤 섹션에도 안 들음 → False
+    a_other = _article("잡 기사", "other", 4, "national")
+    assert not is_sendable(a_other, active_sections=PHASE1_ACTIVE, min_importance=4)
+
+    # 정의당 경남(justice_party + gyeongnam) 4점 → 섹션 7 → True
+    a_justice_gn = _article("정의당 경남", "justice_party", 4, "gyeongnam")
+    assert is_sendable(a_justice_gn, active_sections=PHASE1_ACTIVE, min_importance=4)
+
+    # 정의당 both 스코프 → 섹션 7(경남)에 들음 → True
+    a_justice_both = _article("정의당 전국+경남", "justice_party", 4, "both")
+    assert is_sendable(a_justice_both, active_sections=PHASE1_ACTIVE, min_importance=4)
