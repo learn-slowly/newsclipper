@@ -2,11 +2,10 @@
 섹션 구성 모듈
 
 분류된 기사를 9개 섹션으로 조직한다.
-같은 이슈를 다룬 기사는 하나의 그룹으로 묶어서 보여준다.
-Phase 1에서는 5개 섹션만 활성화 (노동, 기후, 경남정치, 정의당경남, 정의당전국).
+같은 사건을 다룬 여러 언론사 기사는 하나의 묶음으로 합쳐서 보여준다.
+Phase 1에서는 6개 섹션 활성화 (노동, 기후, 경남정치, 정의당경남, 정의당전국, 연대정당).
 """
 
-import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -15,22 +14,11 @@ from loguru import logger
 from src.collect import Article
 
 
-# 같은 이슈로 묶는 임계값
-TITLE_SIMILARITY_THRESHOLD = 0.45  # 제목 문자열 유사도만으로 묶기
-KEYWORD_OVERLAP_MIN = 2            # 키워드 겹침 최소 개수 (이 이상이면 같은 이슈)
-
-# 키워드 추출 시 무시할 일반적인 단어
-_STOPWORDS = {
-    # 조사·접속사
-    "의", "에", "을", "를", "이", "가", "은", "는", "와", "과", "도", "로", "서",
-    "한", "된", "및", "등", "위", "중", "후", "전", "대", "더", "것", "수", "만",
-    # 기사에서 흔한 일반 동사·명사
-    "했다", "한다", "밝혔다", "전했다", "보도", "관련", "기자", "뉴스",
-    "발표", "��장", "지적", "설명", "강조", "예정", "계획", "결과",
-    "확인", "조사", "논의", "이후", "시작", "현재", "올해", "지난",
-    # 정치 기사에서 너무 흔한 단어 (이것만으로 같은 이슈 판단 방지)
-    "후보", "경남", "경상남도", "부산", "울산", "지역", "정부", "국회",
-}
+# 같은 사건으로 묶는 제목 유사도 임계값
+# 2026-08-11 실측: 같은 사건 0.53~0.68, 다른 사건 0.19~0.25 → 0.45가 안전한 경계.
+# 이전에는 "키워드 2개 이상 겹침" 규칙도 있었으나, 같은 사건이 아니라 비슷한 주제까지
+# 묶어버려(창원 시내버스 기사에 우체국 택배 기사가 붙는 식) 제거했다.
+TITLE_SIMILARITY_THRESHOLD = 0.45
 
 
 @dataclass
@@ -76,12 +64,15 @@ PHASE1_ACTIVE = {1, 2, 6, 7, 8, 9}
 # 발송 기준 중요도 기본값 (keywords.yaml의 min_importance로 재정의 가능)
 DEFAULT_MIN_IMPORTANCE = 4
 
+# 회당 최대 발송 묶음 수 기본값 (keywords.yaml의 max_items로 재정의 가능)
+DEFAULT_MAX_ITEMS = 30
+
 
 def _matches_section(article: Article, category: str, scope_filter: str | None) -> bool:
     """기사가 이 섹션에 들어가는 기사인지 판정 (카테고리 + 지역 범위)
 
     섹션 배치 규칙은 이 함수 한 곳에만 둔다.
-    build_sections(발송)와 is_sendable(요약 대상 판정)이 같은 기준을 쓰게 하기 위함이다.
+    build_sections가 섹션마다 이 규칙으로 기사를 고른다.
     """
     if article.category != category:
         return False
@@ -95,117 +86,112 @@ def _matches_section(article: Article, category: str, scope_filter: str | None) 
     return True
 
 
-def is_sendable(
-    article: Article,
-    active_sections: set[int] | None = None,
-    min_importance: int = DEFAULT_MIN_IMPORTANCE,
-) -> bool:
-    """이 기사가 실제로 브리핑에 실릴 기사인지 판정
-
-    요약(Sonnet) 단계에서 이 판정을 먼저 해서, 발송되지 않을 기사에는
-    요약 비용을 쓰지 않는다. 꺼진 섹션(여성·청년·복지)과 other 기사가
-    여기서 걸러진다.
-
-    Args:
-        article: 분류·가산까지 끝난 기사
-        active_sections: 활성화된 섹션 번호 (None이면 전체)
-        min_importance: 발송 기준 중요도
-
-    Returns:
-        활성 섹션 중 하나에 배치되면 True
-    """
-    if article.importance < min_importance:
-        return False
-
-    active = active_sections if active_sections is not None else set(range(1, 10))
-
-    return any(
-        number in active and _matches_section(article, category, scope_filter)
-        for number, _name, _emoji, category, scope_filter in SECTION_DEFS
-    )
-
-
 def build_sections(
     articles: list[Article],
     active_sections: set[int] | None = None,
     min_importance: int = DEFAULT_MIN_IMPORTANCE,
+    max_items: int | None = DEFAULT_MAX_ITEMS,
 ) -> list[Section]:
-    """기사를 섹션별로 분류
+    """기사를 섹션별로 조직하고, 같은 사건은 하나로 묶고, 분량을 제한한다
+
+    순서:
+    1. 발송 기준 점수 미달 기사 제외
+    2. 섹션별로 배치 (카테고리 + 지역 범위)
+    3. 같은 사건을 다룬 여러 언론사 기사를 하나의 묶음으로 합침
+    4. 전체 묶음을 중요도 높은 순으로 max_items개만 남김 (분량 보장)
 
     Args:
         articles: 분류 완료된 기사 리스트
         active_sections: 활성화할 섹션 번호 (None이면 전체)
-        min_importance: 이 점수 이상만 섹션에 포함 (분량 폭주 방지)
+        min_importance: 이 점수 이상만 섹션에 포함
+        max_items: 회당 최대 발송 묶음 수 (None이면 제한 없음)
 
     Returns:
         기사가 있는 섹션만 반환 (빈 섹션은 생략)
     """
     active = active_sections if active_sections is not None else set(range(1, 10))
 
-    # 발송 기준 미달 기사 제외
+    # 1. 발송 기준 미달 기사 제외
     articles = [a for a in articles if a.importance >= min_importance]
 
-    sections = []
+    # 2~3. 섹션별 배치 + 같은 사건 묶기
+    #     (섹션 번호 → 그 섹션의 묶음 목록)
+    per_section: dict[int, list[ArticleGroup]] = {}
 
-    for number, name, emoji, category, scope_filter in SECTION_DEFS:
+    for number, _name, _emoji, category, scope_filter in SECTION_DEFS:
         if number not in active:
             continue
 
-        # 카테고리 + 스코프 매칭
         matched = [a for a in articles if _matches_section(a, category, scope_filter)]
+        if not matched:
+            continue
 
-        # 중요도 높은 순 정렬
+        # 중요도 높은 기사가 묶음의 대표가 되도록 먼저 정렬
         matched.sort(key=lambda a: a.importance, reverse=True)
+        per_section[number] = _group_similar(matched)
 
-        # 빈 섹션 생략
-        if matched:
-            # 그룹화 없이 기사별로 개별 표시
-            groups = [ArticleGroup(primary=a) for a in matched]
-            sections.append(Section(
-                number=number,
-                name=name,
-                emoji=emoji,
-                articles=matched,
-                groups=groups,
-            ))
+    # 4. 전체 묶음을 중요도 순으로 잘라내 분량 보장
+    if max_items is not None:
+        kept = _cap_groups(per_section, max_items)
+    else:
+        kept = per_section
+
+    # 섹션 객체 조립 (빈 섹션 생략)
+    sections = []
+    for number, name, emoji, _category, _scope_filter in SECTION_DEFS:
+        groups = kept.get(number)
+        if not groups:
+            continue
+        sections.append(Section(
+            number=number,
+            name=name,
+            emoji=emoji,
+            articles=[a for g in groups for a in g.all_articles],
+            groups=groups,
+        ))
 
     return sections
 
 
-def _extract_keywords(text: str) -> set[str]:
-    """텍스트에서 의미 있는 키워드 추출 (2글자 이상, 불용어 제외)"""
-    words = re.findall(r"[가-힣]{2,}|[a-zA-Z]{2,}|[0-9]+", text)
-    return {w for w in words if w not in _STOPWORDS}
+def _cap_groups(
+    per_section: dict[int, list[ArticleGroup]], max_items: int
+) -> dict[int, list[ArticleGroup]]:
+    """전체 묶음 중 중요도 높은 순으로 max_items개만 남긴다
+
+    섹션별 할당량을 미리 정하지 않고 전체에서 고른다.
+    그날 중요한 뉴스가 몰린 섹션이 자연스럽게 더 많이 실린다.
+    """
+    flat = [(number, g) for number, groups in per_section.items() for g in groups]
+    if len(flat) <= max_items:
+        return per_section
+
+    # 중요도 높은 순. 같은 점수면 관련 기사가 많은(여러 매체가 다룬) 묶음 우선.
+    flat.sort(key=lambda t: (t[1].primary.importance, len(t[1].related)), reverse=True)
+    dropped = len(flat) - max_items
+    flat = flat[:max_items]
+
+    capped: dict[int, list[ArticleGroup]] = {}
+    for number, group in flat:
+        capped.setdefault(number, []).append(group)
+
+    logger.info(f"  분량 제한: 상위 {max_items}건만 발송 ({dropped}건 제외)")
+    return capped
 
 
 def _is_same_issue(a: Article, b: Article) -> bool:
-    """두 기사가 같은 이슈인지 판단
+    """두 기사가 같은 사건을 다루는지 판단 (제목 유사도만 사용)
 
-    다음 중 하나라도 만족하면 같은 이슈:
-    1. 제목 문자열 유사도 >= 0.4
-    2. 키워드 겹침 >= 2개
+    여러 언론사가 같은 사건을 보도하면 제목이 비슷해진다.
+    주제가 비슷하다는 이유로 묶으면 다른 사건이 섞이므로 제목만 본다.
     """
-    # 1. 제목 유사도 체크
-    title_sim = SequenceMatcher(None, a.title, b.title).ratio()
-    if title_sim >= TITLE_SIMILARITY_THRESHOLD:
-        return True
-
-    # 2. 키워드 겹침 체크
-    kw_a = _extract_keywords(f"{a.title} {a.summary}")
-    kw_b = _extract_keywords(f"{b.title} {b.summary}")
-    overlap = kw_a & kw_b
-
-    if len(overlap) >= KEYWORD_OVERLAP_MIN:
-        return True
-
-    return False
+    return SequenceMatcher(None, a.title, b.title).ratio() >= TITLE_SIMILARITY_THRESHOLD
 
 
 def _group_similar(articles: list[Article]) -> list[ArticleGroup]:
     """같은 이슈를 다룬 기사를 그룹으로 묶기
 
-    중요도 높은 순으로 이미 정렬된 상태에서,
-    제목 유사도 + 키워드 겹침을 종합하여 같은 이슈인지 판단한다.
+    중요도 높은 순으로 이미 정렬된 상태에서, 제목이 닮은 기사를 같은 묶음으로 합친다.
+    먼저 온 기사(중요도 높은 쪽)가 대표가 된다.
     """
     groups: list[ArticleGroup] = []
 

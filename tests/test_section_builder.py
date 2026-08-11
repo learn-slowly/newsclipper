@@ -6,7 +6,7 @@
 """
 
 from src.collect import Article
-from src.section_builder import PHASE1_ACTIVE, build_sections, is_sendable
+from src.section_builder import PHASE1_ACTIVE, build_sections
 
 
 def _article(title: str, category: str, importance: int, scope: str = "national") -> Article:
@@ -51,32 +51,72 @@ def test_연대정당_섹션_활성화():
 
 
 
-def test_발송_불가_기사는_요약_대상에서_제외():
-    """is_sendable — 꺼진 섹션·점수 미달·other는 요약하지 않는다 (비용 절감)
+def test_같은_사건_기사는_하나로_묶임():
+    """여러 언론사가 같은 사건을 보도하면 제목이 닮아 한 묶음이 된다
 
-    요약(Sonnet) 단계에서 build_sections와 같은 기준으로 걸러내는지 검증한다.
-    꺼진 섹션(3·4·5) 기사는 점수가 높아도 False → 요약 비용 절약.
+    대표 기사 1건 + 관련 기사 나머지. 발송 건수는 묶음 수로 센다.
     """
-    # 활성 섹션(labor) 4점 → True
-    a_labor = _article("노동 기사", "labor", 4, "national")
-    assert is_sendable(a_labor, active_sections=PHASE1_ACTIVE, min_importance=4)
+    articles = [
+        _article("창원 시내버스 사전조정에서 임금협상 타결", "labor", 5),
+        _article("창원 시내버스 노사, 사전조정서 임금협상 타결 1.9% 인상", "labor", 4),
+        _article("우체국 택배노동자 폭염 속 겸배 중단 촉구", "labor", 4),
+    ]
+    sections = build_sections(articles, active_sections={1}, min_importance=4)
 
-    # 꺼진 섹션(gender_minority) 5점 → False (요약 안 함)
-    a_gender = _article("여성 기사", "gender_minority", 5, "national")
-    assert not is_sendable(a_gender, active_sections=PHASE1_ACTIVE, min_importance=4)
+    assert len(sections) == 1
+    # 같은 사건 2건이 묶여 총 2묶음 (창원버스, 우체국택배)
+    assert len(sections[0].groups) == 2
+    assert len(sections[0].articles) == 3
 
-    # 점수 미달(labor 3점) → False
-    a_low = _article("덜 중요 노동", "labor", 3, "national")
-    assert not is_sendable(a_low, active_sections=PHASE1_ACTIVE, min_importance=4)
+    버스묶음 = sections[0].groups[0]
+    assert "창원 시내버스" in 버스묶음.primary.title
+    assert len(버스묶음.related) == 1
 
-    # other 카테고리 4점 → 어떤 섹션에도 안 들음 → False
-    a_other = _article("잡 기사", "other", 4, "national")
-    assert not is_sendable(a_other, active_sections=PHASE1_ACTIVE, min_importance=4)
 
-    # 정의당 경남(justice_party + gyeongnam) 4점 → 섹션 7 → True
-    a_justice_gn = _article("정의당 경남", "justice_party", 4, "gyeongnam")
-    assert is_sendable(a_justice_gn, active_sections=PHASE1_ACTIVE, min_importance=4)
+def test_다른_사건은_묶이지_않음():
+    """주제가 비슷해도 사건이 다르면 따로 보낸다 (제목만으로 판단)"""
+    articles = [
+        _article("금속노조 현대차 원청 사용자성 인정 요구", "labor", 4),
+        _article("폭염 속 고공농성 택시노동자 간주근로제 촉구", "labor", 4),
+    ]
+    sections = build_sections(articles, active_sections={1}, min_importance=4)
 
-    # 정의당 both 스코프 → 섹션 7(경남)에 들음 → True
-    a_justice_both = _article("정의당 전국+경남", "justice_party", 4, "both")
-    assert is_sendable(a_justice_both, active_sections=PHASE1_ACTIVE, min_importance=4)
+    assert len(sections[0].groups) == 2
+
+
+# 서로 안 묶이는 실제 기사풍 제목 (서로 간 제목 유사도 최대 0.38 < 0.45)
+_별개_사건 = [
+    "금속노조 현대차 원청 사용자성 인정 요구",
+    "폭염 속 고공농성 택시노동자 간주근로제 촉구",
+    "우체국 택배노동자 겸배 중단 촉구 기자회견",
+    "한화오션 중대재해 유가족 진상규명 요구",
+    "쿠팡 물류센터 야간노동 실태조사 발표",
+    "건설노조 임금체불 집단진정 접수",
+]
+
+
+def test_분량_상한을_넘지_않음():
+    """max_items를 넘으면 중요도 높은 순으로 잘라낸다"""
+    # 앞 3건은 5점, 뒤 3건은 4점
+    articles = [
+        _article(title, "labor", 5 if i < 3 else 4)
+        for i, title in enumerate(_별개_사건)
+    ]
+    sections = build_sections(
+        articles, active_sections={1}, min_importance=4, max_items=3
+    )
+
+    총묶음 = sum(len(s.groups) for s in sections)
+    assert 총묶음 == 3
+    # 중요도 5점짜리가 우선 남는다
+    assert all(g.primary.importance == 5 for s in sections for g in s.groups)
+
+
+def test_상한보다_적으면_그대로_발송():
+    """묶음 수가 상한보다 적으면 아무것도 잘리지 않는다"""
+    articles = [_article(t, "labor", 4) for t in _별개_사건[:2]]
+    sections = build_sections(
+        articles, active_sections={1}, min_importance=4, max_items=30
+    )
+
+    assert sum(len(s.groups) for s in sections) == 2
