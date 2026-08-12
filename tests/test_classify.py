@@ -85,3 +85,55 @@ def test_JSON_파싱_실패시_classified_ok_False():
     result = classify_article(_make_article(), client, _TEMPLATE)
 
     assert result["classified_ok"] is False
+
+
+
+def test_response_needed_high_파싱():
+    """response_needed=high가 정상 파싱됨"""
+    client = _make_client(
+        text='{"category":"labor","importance":5,"scope":"gyeongnam","response_needed":"high"}'
+    )
+    result = classify_article(_make_article(), client, _TEMPLATE)
+    assert result["classified_ok"] is True
+    assert result["response_needed"] == "high"
+
+
+def test_response_needed_medium_파싱():
+    """response_needed=medium이 정상 파싱됨"""
+    client = _make_client(
+        text='{"category":"labor","importance":3,"scope":"national","response_needed":"medium"}'
+    )
+    result = classify_article(_make_article(), client, _TEMPLATE)
+    assert result["response_needed"] == "medium"
+
+
+def test_response_needed_없으면_none():
+    """응답에 response_needed가 없으면 기본값 none"""
+    client = _make_client(
+        text='{"category":"labor","importance":3,"scope":"national"}'
+    )
+    result = classify_article(_make_article(), client, _TEMPLATE)
+    assert result["response_needed"] == "none"
+
+
+def test_response_needed_잘못된_값_none으로():
+    """response_needed에 허용되지 않은 값이면 none으로 변경"""
+    client = _make_client(
+        text='{"category":"labor","importance":3,"scope":"national","response_needed":"urgent"}'
+    )
+    result = classify_article(_make_article(), client, _TEMPLATE)
+    assert result["response_needed"] == "none"
+
+
+def test_분류_실패시_response_needed_none():
+    """분류 실패(API 오류)면 response_needed도 기본값 none"""
+    client = _make_client(raise_exc=httpx.ConnectError("fail"))
+    result = classify_article(_make_article(), client, _TEMPLATE)
+    assert result["classified_ok"] is False
+    assert result["response_needed"] == "none"
+
+
+def test_Article_기본값_none():
+    """Article 생성 시 response_needed 기본값이 none"""
+    art = Article(title="테스트", url="http://x.com", source="test")
+    assert art.response_needed == "none"

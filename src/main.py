@@ -286,19 +286,21 @@ async def run_pipeline():
         if jpnews_creds and jpnews_sheet:
             try:
                 statements = read_statements(jpnews_creds, jpnews_sheet, months=6)
+                high_count = 0
                 matched = 0
                 for s in sections:
                     for g in s.groups:
                         art = g.primary
                         if art.response_needed != "high":
                             continue
+                        high_count += 1
                         match = find_matching_statement(
                             statements, art.category, art.title,
                         )
                         if match:
                             statement_map[art.url] = match
                             matched += 1
-                logger.info(f"대응 필요(high) 기사 중 {matched}건에 참고 논평 연결")
+                logger.info(f"대응 필요(high) {high_count}건 / 논평 매칭 {matched}건")
             except Exception as e:
                 logger.warning(f"논평 매칭 실패 (브리핑은 계속): {e}")
         else:
