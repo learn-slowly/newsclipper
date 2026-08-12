@@ -26,14 +26,12 @@ climate:
 
 # ── 진보 매체 (전국 이슈 + 정당 동향) ───────────────
 progressive:
-  - name: 프레시안
-    url: https://www.pressian.com/rss/allArticle.xml
-    scope: national
+  # 프레시안: RSS 폐기(2026-08 확인, /rss/allArticle.xml → 404) → config/scrape.yaml에서 섹션별 스크래핑으로 수집
   - name: 오마이뉴스
     url: https://rss.ohmynews.com/rss/ohmynews.xml
     scope: national
   - name: 참세상
-    url: https://www.newscham.net/rss/allArticle.xml
+    url: http://www.newscham.net/rss/cast.xml
     scope: national
 
 # ── 주요 일간지 (정치/사회 섹션) ──────────────────

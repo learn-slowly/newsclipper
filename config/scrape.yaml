@@ -3,6 +3,24 @@
 
 sources:
   # 경남신문: 기사 목록이 JS(AJAX)로 로딩 — 일반 스크래핑 불가. 추후 Playwright 검토
+  # 프레시안: RSS 폐기(2026-08 확인) → 섹션 페이지 스크래핑으로 전환.
+  # 기사 URL 패턴: /pages/articles/{id}
+  - name: 프레시안
+    url: https://www.pressian.com/pages/news-politics   # 정치
+    scope: national
+    base_url: https://www.pressian.com
+    timeout: 30
+  - name: 프레시안
+    url: https://www.pressian.com/pages/news-society     # 사회
+    scope: national
+    base_url: https://www.pressian.com
+    timeout: 30
+  - name: 프레시안
+    url: https://www.pressian.com/pages/nation-kn         # 경남
+    scope: gyeongnam
+    base_url: https://www.pressian.com
+    timeout: 30
+
 
   - name: MBC경남
     url: https://www.mbcgn.kr/01_new/new01_list.asp

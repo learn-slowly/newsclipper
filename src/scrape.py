@@ -184,6 +184,18 @@ def _extract_links_from_html(html_text: str, source_config: dict) -> list[dict]:
                 seen_urls.add(url)
                 articles.append({"title": title, "url": url})
 
+
+    elif name == "프레시안":
+        # 기사 URL: href="/pages/articles/2026081214152226144", 링크 안 텍스트가 제목
+        pattern = r'<a\s+[^>]*href="(/pages/articles/\d+)"[^>]*>(.*?)</a>'
+        for path, inner in re.findall(pattern, html_text, re.DOTALL):
+            title = _clean_title(inner)
+            if not title or len(title) < 5:
+                continue
+            url = urljoin(base_url, path)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                articles.append({"title": title, "url": url})
     else:
         # 기본: href에서 링크 추출
         pattern = r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
