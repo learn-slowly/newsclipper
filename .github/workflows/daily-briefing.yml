@@ -34,6 +34,8 @@ jobs:
           TELEGRAM_ADMIN_USER_ID: ${{ secrets.TELEGRAM_ADMIN_USER_ID }}
           LOG_LEVEL: INFO
           TIMEZONE: Asia/Seoul
+          JPNEWS_SHEETS_CREDENTIALS: ${{ secrets.JPNEWS_SHEETS_CREDENTIALS }}
+          JPNEWS_SHEET_ID: ${{ secrets.JPNEWS_SHEET_ID }}
         run: |
           python -m src.main
 

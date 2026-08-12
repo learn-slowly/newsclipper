@@ -28,11 +28,12 @@ def _format_scope(scope: str) -> str:
     )
 
 
-def _format_article(article: Article) -> str:
+def _format_article(article: Article, statement=None) -> str:
     """단일 기사를 텔레그램 메시지 포맷으로 변환"""
-    # 본문 미확인이면 ⚠️, 그게 아니고 중요도 5점이면 🔥
     if article.low_content:
         prefix = "⚠️ "
+    elif getattr(article, "response_needed", "") == "high":
+        prefix = "📢 "
     elif article.importance == 5:
         prefix = "🔥 "
     else:
@@ -48,18 +49,29 @@ def _format_article(article: Article) -> str:
 
     line += f"\n   {article.url}"
 
+    # 대응 필요(high) 기사에 중앙당 논평 표시
+    if getattr(article, "response_needed", "") == "high":
+        if statement:
+            line += f"\n   📌 참고 논평: {statement.title} ({statement.date})"
+            line += f"\n      {statement.link}"
+        else:
+            line += f"\n   📌 중앙당 참고 논평 없음 — 도당 자체 대응 검토"
+
     return line
 
 
-def _format_group(group: ArticleGroup) -> str:
+def _format_group(group: ArticleGroup, statement=None) -> str:
     """기사 그룹을 텔레그램 메시지 포맷으로 변환
 
     대표 기사: 제목 + 코멘트 + 링크
     관련 기사: 출처명 + 링크만 간략히
+    statement: 매칭된 중앙당 논평 (있으면 표시)
     """
     primary = group.primary
     if primary.low_content:
         prefix = "⚠️ "
+    elif getattr(primary, "response_needed", "") == "high":
+        prefix = "📢 "
     elif primary.importance == 5:
         prefix = "🔥 "
     else:
@@ -80,13 +92,22 @@ def _format_group(group: ArticleGroup) -> str:
         for related in group.related:
             line += f"\n   · [{related.source}] {related.url}"
 
+    # 대응 필요(high) 기사에 중앙당 논평 표시
+    if getattr(primary, "response_needed", "") == "high":
+        if statement:
+            line += f"\n   📌 참고 논평: {statement.title} ({statement.date})"
+            line += f"\n      {statement.link}"
+        else:
+            line += f"\n   📌 중앙당 참고 논평 없음 — 도당 자체 대응 검토"
+
     return line
 
 
-def _format_section(section: Section) -> str:
+def _format_section(section: Section, statement_map: dict | None = None) -> str:
     """단일 섹션을 텔레그램 메시지 포맷으로 변환"""
     total = len(section.articles)
     group_count = len(section.groups)
+    smap = statement_map or {}
 
     # 그룹이 있으면 이슈 수로 표시
     if group_count < total:
@@ -97,18 +118,26 @@ def _format_section(section: Section) -> str:
     # 그룹 기반으로 포맷
     if section.groups:
         items_text = "\n\n".join(
-            _format_group(g) for g in section.groups
+            _format_group(g, smap.get(g.primary.url))
+            for g in section.groups
         )
     else:
         items_text = "\n\n".join(
-            _format_article(a) for a in section.articles
+            _format_article(a, smap.get(a.url)) for a in section.articles
         )
 
     return f"{header}\n{items_text}"
 
 
-def format_briefing(sections: list[Section], total_collected: int) -> str:
-    """전체 브리핑 메시지 생성"""
+def format_briefing(
+    sections: list[Section],
+    total_collected: int,
+    statement_map: dict | None = None,
+) -> str:
+    """전체 브리핑 메시지 생성
+
+    statement_map: 기사 URL → Statement 매칭 (없으면 빈 dict)
+    """
     tz = ZoneInfo(os.getenv("TIMEZONE", "Asia/Seoul"))
     now = datetime.now(tz)
     today = now.strftime("%Y-%m-%d (%a)")
@@ -122,7 +151,7 @@ def format_briefing(sections: list[Section], total_collected: int) -> str:
         f"오늘 총 {total_collected}건 중 {total_selected}건 선별"
     )
 
-    section_texts = [_format_section(s) for s in sections]
+    section_texts = [_format_section(s, statement_map) for s in sections]
 
     return header + "\n\n" + "\n\n".join(section_texts)
 

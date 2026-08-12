@@ -44,15 +44,20 @@ VALID_CATEGORIES = {
 # 유효한 스코프 목록
 VALID_SCOPES = {"gyeongnam", "national", "both"}
 
+# 유효한 대응 필요도 목록
+VALID_RESPONSE_NEEDED = {"high", "medium", "none"}
+
 # 분류 실패 시 기본값
 FALLBACK_CATEGORY = "other"
 FALLBACK_IMPORTANCE = 1
 FALLBACK_SCOPE = "national"
+FALLBACK_RESPONSE_NEEDED = "none"
 
 _FALLBACK_RESULT = {
     "category": FALLBACK_CATEGORY,
     "importance": FALLBACK_IMPORTANCE,
     "scope": FALLBACK_SCOPE,
+    "response_needed": FALLBACK_RESPONSE_NEEDED,
     "tokens_in": 0,
     "tokens_out": 0,
     "classified_ok": False,
@@ -140,10 +145,15 @@ def classify_article(
         if scope not in VALID_SCOPES:
             scope = FALLBACK_SCOPE
 
+        response_needed = result.get("response_needed", FALLBACK_RESPONSE_NEEDED)
+        if response_needed not in VALID_RESPONSE_NEEDED:
+            response_needed = FALLBACK_RESPONSE_NEEDED
+
         return {
             "category": category,
             "importance": importance,
             "scope": scope,
+            "response_needed": response_needed,
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "classified_ok": True,
@@ -186,6 +196,7 @@ def classify_articles(
             article.category = result["category"]
             article.importance = result["importance"]
             article.scope = result["scope"]
+            article.response_needed = result["response_needed"]
             article.classified_ok = result["classified_ok"]
             total_tokens_in += result["tokens_in"]
             total_tokens_out += result["tokens_out"]

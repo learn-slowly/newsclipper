@@ -30,6 +30,7 @@ from src.section_builder import DEFAULT_MAX_ITEMS, DEFAULT_MAX_PER_SECTION, DEFA
 from src.storage import Storage
 from src.summarize import summarize_articles
 from src.telegram_push import format_briefing, send_error_alert, send_telegram
+from src.jpnews_reader import read_statements, find_matching_statement
 
 
 # ── 로거 설정 ─────────────────────────────────
@@ -277,9 +278,35 @@ async def run_pipeline():
         if cost > DAILY_COST_WARNING:
             logger.warning(f"⚠️ 일일 비용 경고! ${cost:.4f} > ${DAILY_COST_WARNING}")
 
-        # 7. 텔레그램 발송
-        logger.info("📤 Step 7: 텔레그램 발송")
-        briefing_text = format_briefing(sections, total_collected)
+        # 7. 중앙당 논평 매칭 (대응 필요 기사에 참고 논평 연결)
+        logger.info("📌 Step 7: 중앙당 논평 매칭")
+        jpnews_creds = os.environ.get("JPNEWS_SHEETS_CREDENTIALS", "")
+        jpnews_sheet = os.environ.get("JPNEWS_SHEET_ID", "")
+        statement_map = {}  # article URL → Statement (기사별 매칭)
+        if jpnews_creds and jpnews_sheet:
+            try:
+                statements = read_statements(jpnews_creds, jpnews_sheet, months=6)
+                matched = 0
+                for s in sections:
+                    for g in s.groups:
+                        art = g.primary
+                        if art.response_needed != "high":
+                            continue
+                        match = find_matching_statement(
+                            statements, art.category, art.title,
+                        )
+                        if match:
+                            statement_map[art.url] = match
+                            matched += 1
+                logger.info(f"대응 필요(high) 기사 중 {matched}건에 참고 논평 연결")
+            except Exception as e:
+                logger.warning(f"논평 매칭 실패 (브리핑은 계속): {e}")
+        else:
+            logger.info("jpnews 시트 미설정 — 논평 매칭 건너뜀")
+
+        # 8. 텔레그램 발송
+        logger.info("📤 Step 8: 텔레그램 발송")
+        briefing_text = format_briefing(sections, total_collected, statement_map)
         sent = await send_telegram(briefing_text, bot_token, channel_id)
 
         if not sent:

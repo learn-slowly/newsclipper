@@ -54,6 +54,7 @@ class Article:
     category: str = ""
     importance: int = 0
     scope: str = ""
+    response_needed: str = ""  # high, medium, none (classify.py에서 채움)
 
     # 요약 결과 (summarize.py에서 채움)
     ai_summary: str = ""
