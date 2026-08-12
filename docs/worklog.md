@@ -30,3 +30,17 @@
 ## 2026-08-11 — 프로젝트 파악 + 문서 실측 정정
 
 - PRD/todolist 6군데를 실측치로 바로잡음 (수집처 개수, 발송량, 비용, 고장 목록)
+
+
+## 2026-08-12 — Phase 3: 수집 빈틈 복구 + 중앙당 논평 연동
+
+- PRD.md에 Phase 3 기획 추가 (수집 빈틈 복구 + 대응 필요도 + 논평 매칭)
+- 수집 빈틈 복구: 프레시안 스크래핑 전환(20건), 참세상 RSS 주소 교체(30건), 구글알리미·MBC경남·민중의소리 정상 확인
+- jpnews 구글시트 6열 전환 (날짜·유형·제목·주제·본문·원문링크), 백업 탭 보존
+- jpnews 코드 수정: Gemini 모델 교체(gemini-3.5-flash-lite), 신규 메시지만 분류, 분류 실패 시 저장 방지
+- jpnews 백필 스크립트 제작: 순번 ID + 실패 건 1건 재시도 + 유형 정규화. 약 4,100건 처리, 2,615건 남음
+- newsclipper에 jpnews_reader.py 추가: 구글시트에서 논평 로드 + 키워드 겹침 기반 매칭
+- classify.txt에 response_needed(high/medium/none) 추가, classify.py 검증·기본값·적용
+- telegram_push.py: 📢 대응필요 + 📌 참고 논평/없음 표시 (그룹 있는/없는 경로 모두)
+- GitHub Actions: JPNEWS_SHEETS_CREDENTIALS/JPNEWS_SHEET_ID 시크릿 추가, 수동 실행 성공 (논평 108건 로드, 발송 성공)
+- 테스트 37개 전부 통과 (기존 18 + 논평 표시 13 + 분류 파싱 6)
