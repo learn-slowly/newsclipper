@@ -41,7 +41,7 @@
 - 분류(Luna)와 요약(Sonnet) 호출 시 **토큰 사용량을 반드시 로그로 남긴다**
 - `briefings` 테이블의 `haiku_tokens_in/out`(컬럼명은 초기 스키마 유지 — 내용물은 분류 모델 토큰), `sonnet_tokens_in/out`, `estimated_cost_usd`에 기록
 - 일일 비용이 $1.5 초과하면 경고 로그 출력
-- 월 비용 $30 초과 예상 시: Sonnet 요약 기준을 자동 상향 (현재 미작동 — `docs/todolist.md` 항목 5 참조)
+- 월 비용 $30 초과 예상 시: Sonnet 요약 기준을 자동 상향 (현재 미작동 — `docs/todolist.md` 항목 4 참조)
 
 ### 4. 보안
 - API 키·토큰은 **절대 코드에 하드코딩하지 않는다**
