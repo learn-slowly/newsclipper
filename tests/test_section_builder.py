@@ -120,3 +120,78 @@ def test_상한보다_적으면_그대로_발송():
     )
 
     assert sum(len(s.groups) for s in sections) == 2
+
+
+def test_섹션당_상한이_소량에도_적용됨():
+    """전체가 max_items 이하여도 한 섹션이 max_per_section을 넘지 않는다"""
+    # 노동 15건(전체 상한 30 이하) — max_per_section=5이면 5건만 남아야
+    articles = [_article(t, "labor", 4) for t in _별개_사건[:6]]
+    sections = build_sections(
+        articles, active_sections={1}, min_importance=4,
+        max_items=30, max_per_section=5,
+    )
+
+    총묶음 = sum(len(s.groups) for s in sections)
+    assert 총묶음 == 5  # 6건 중 5건만
+
+
+def test_최소보장이_상한초과_안하고_모든섹션_최소1건():
+    """active_sections × min_per_section > max_items여도 총량은 max_items 이내이고,
+    후보가 있는 모든 섹션이 최소 1건은 받는다 (순서 편향 없음)."""
+    # 2섹션(노동·기후) × 최소 20 = 40 > max_items 3
+    articles = (
+        [_article(t, "labor", 4) for t in _별개_사건[:3]]
+        + [_article("경남 폭염 가뭄 비상 대응 회의 소집", "climate", 4)]
+    )
+    sections = build_sections(
+        articles, active_sections={1, 2}, min_importance=4,
+        max_items=3, min_per_section=20,
+    )
+
+    총묶음 = sum(len(s.groups) for s in sections)
+    assert 총묶음 <= 3
+    # 후보가 있는 두 섹션 모두 최소 1건은 받아야 한다
+    섹션이름 = {s.name for s in sections}
+    assert "노동·파업·산재" in 섹션이름, "노동 섹션이 빠짐"
+    assert "기후·환경" in 섹션이름, "기후 섹션이 빠짐"
+
+
+def test_최소보장이_최대보다_크면_최대로_내림():
+    """min_per_section > max_per_section이면 max_per_section으로 자른다"""
+    articles = [_article(t, "labor", 4) for t in _별개_사건[:6]]
+    sections = build_sections(
+        articles, active_sections={1}, min_importance=4,
+        max_items=30, min_per_section=10, max_per_section=2,
+    )
+
+    총묶음 = sum(len(s.groups) for s in sections)
+    assert 총묶음 == 2  # max_per_section이 이김
+
+
+def test_같은_점수_기사가_섹션간_균등_배분():
+    """같은 중요도의 기사가 여러 섹션에 있으면 한쪽이 독식하지 않는다
+
+    2단계(풀 채우기)에서 동점 편향을 방지하는 돌아가며 배분 검증.
+    노동 5건 + 기후 5건 전부 4점이고 max_items=6이면 3:3이어야 한다.
+    """
+    articles = [
+        _article("금속노조 현대차 원청 사용자성 인정 요구", "labor", 4),
+        _article("폭염 속 고공농성 택시노동자 간주근로제 촉구", "labor", 4),
+        _article("우체국 택배노동자 겸배 중단 촉구 기자회견", "labor", 4),
+        _article("한화오션 중대재해 유가족 진상규명 요구", "labor", 4),
+        _article("쿠팡 물류센터 야간노동 실태조사 발표", "labor", 4),
+        _article("경남 폭염 가뭄 비상 대응 회의 소집", "climate", 4),
+        _article("낙동강 녹조 발생 경남 취수원 비상 상황", "climate", 4),
+        _article("기후보험 개발 운영 활성화 법안 의결 발표", "climate", 4),
+        _article("경남 전 해역 고수온 특보 확대 발령 조치", "climate", 4),
+        _article("태양광 발전 폐패널 처리 기준 마련 착수", "climate", 4),
+    ]
+    sections = build_sections(
+        articles, active_sections={1, 2}, min_importance=4,
+        max_items=6, min_per_section=1, max_per_section=99,
+    )
+
+    노동 = next((len(s.groups) for s in sections if "노동" in s.name), 0)
+    기후 = next((len(s.groups) for s in sections if "기후" in s.name), 0)
+    assert 노동 + 기후 == 6
+    assert abs(노동 - 기후) <= 1, f"동점 편향: 노동 {노동} vs 기후 {기후}"

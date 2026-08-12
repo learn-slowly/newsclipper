@@ -26,7 +26,7 @@ from src.classify import classify_articles
 from src.keyword_boost import apply_keyword_boost, apply_trusted_boost, load_keywords, prefilter_articles
 from src.scrape import scrape_all
 from src.dedupe import deduplicate_similar, filter_seen
-from src.section_builder import DEFAULT_MAX_ITEMS, DEFAULT_MIN_IMPORTANCE, PHASE1_ACTIVE, build_sections
+from src.section_builder import DEFAULT_MAX_ITEMS, DEFAULT_MAX_PER_SECTION, DEFAULT_MIN_IMPORTANCE, DEFAULT_MIN_PER_SECTION, PHASE1_ACTIVE, build_sections
 from src.storage import Storage
 from src.summarize import summarize_articles
 from src.telegram_push import format_briefing, send_error_alert, send_telegram
@@ -236,12 +236,19 @@ async def run_pipeline():
         settings = load_keywords()
         min_importance = settings.get("min_importance", DEFAULT_MIN_IMPORTANCE)
         max_items = settings.get("max_items", DEFAULT_MAX_ITEMS)
-        logger.info(f"발송 기준: 중요도 {min_importance}점 이상, 최대 {max_items}건")
+        min_per_section = settings.get("min_per_section", DEFAULT_MIN_PER_SECTION)
+        max_per_section = settings.get("max_per_section", DEFAULT_MAX_PER_SECTION)
+        logger.info(
+            f"발송 기준: 중요도 {min_importance}점 이상, "
+            f"최대 {max_items}건, 섹션당 {min_per_section}~{max_per_section}건"
+        )
         sections = build_sections(
             articles,
             active_sections=PHASE1_ACTIVE,
             min_importance=min_importance,
             max_items=max_items,
+            min_per_section=min_per_section,
+            max_per_section=max_per_section,
         )
 
         if not sections:

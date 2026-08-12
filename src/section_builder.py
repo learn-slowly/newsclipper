@@ -67,6 +67,12 @@ DEFAULT_MIN_IMPORTANCE = 4
 # 회당 최대 발송 묶음 수 기본값 (keywords.yaml의 max_items로 재정의 가능)
 DEFAULT_MAX_ITEMS = 30
 
+# 섹션당 최소 보장 (이 건수만큼은 어떤 섹션이든 우선 채움, keywords.yaml의 min_per_section)
+DEFAULT_MIN_PER_SECTION = 3
+
+# 섹션당 최대 (한 섹션이 브리핑을 독식하지 않게, keywords.yaml의 max_per_section)
+DEFAULT_MAX_PER_SECTION = 10
+
 
 def _matches_section(article: Article, category: str, scope_filter: str | None) -> bool:
     """기사가 이 섹션에 들어가는 기사인지 판정 (카테고리 + 지역 범위)
@@ -91,6 +97,8 @@ def build_sections(
     active_sections: set[int] | None = None,
     min_importance: int = DEFAULT_MIN_IMPORTANCE,
     max_items: int | None = DEFAULT_MAX_ITEMS,
+    min_per_section: int = DEFAULT_MIN_PER_SECTION,
+    max_per_section: int = DEFAULT_MAX_PER_SECTION,
 ) -> list[Section]:
     """기사를 섹션별로 조직하고, 같은 사건은 하나로 묶고, 분량을 제한한다
 
@@ -98,13 +106,15 @@ def build_sections(
     1. 발송 기준 점수 미달 기사 제외
     2. 섹션별로 배치 (카테고리 + 지역 범위)
     3. 같은 사건을 다룬 여러 언론사 기사를 하나의 묶음으로 합침
-    4. 전체 묶음을 중요도 높은 순으로 max_items개만 남김 (분량 보장)
+    4. 섹션별 최소 보장 + 섹션당 상한 + 전체 중요도순으로 max_items개만 남김
 
     Args:
         articles: 분류 완료된 기사 리스트
         active_sections: 활성화할 섹션 번호 (None이면 전체)
         min_importance: 이 점수 이상만 섹션에 포함
         max_items: 회당 최대 발송 묶음 수 (None이면 제한 없음)
+        min_per_section: 섹션당 최소 보장 건수
+        max_per_section: 섹션당 최대 건수
 
     Returns:
         기사가 있는 섹션만 반환 (빈 섹션은 생략)
@@ -115,7 +125,6 @@ def build_sections(
     articles = [a for a in articles if a.importance >= min_importance]
 
     # 2~3. 섹션별 배치 + 같은 사건 묶기
-    #     (섹션 번호 → 그 섹션의 묶음 목록)
     per_section: dict[int, list[ArticleGroup]] = {}
 
     for number, _name, _emoji, category, scope_filter in SECTION_DEFS:
@@ -126,13 +135,12 @@ def build_sections(
         if not matched:
             continue
 
-        # 중요도 높은 기사가 묶음의 대표가 되도록 먼저 정렬
         matched.sort(key=lambda a: a.importance, reverse=True)
         per_section[number] = _group_similar(matched)
 
-    # 4. 전체 묶음을 중요도 순으로 잘라내 분량 보장
+    # 4. 분량 제한
     if max_items is not None:
-        kept = _cap_groups(per_section, max_items)
+        kept = _cap_groups(per_section, max_items, min_per_section, max_per_section)
     else:
         kept = per_section
 
@@ -154,29 +162,96 @@ def build_sections(
 
 
 def _cap_groups(
-    per_section: dict[int, list[ArticleGroup]], max_items: int
+    per_section: dict[int, list[ArticleGroup]],
+    max_items: int,
+    min_per_section: int = DEFAULT_MIN_PER_SECTION,
+    max_per_section: int = DEFAULT_MAX_PER_SECTION,
 ) -> dict[int, list[ArticleGroup]]:
-    """전체 묶음 중 중요도 높은 순으로 max_items개만 남긴다
+    """섹션별 최소 보장 + 섹션당 상한 + 나머지는 전체 중요도순
 
-    섹션별 할당량을 미리 정하지 않고 전체에서 고른다.
-    그날 중요한 뉴스가 몰린 섹션이 자연스럽게 더 많이 실린다.
+    1단계: 각 섹션에서 중요도 높은 순으로 min_per_section개를 가져간다.
+           단, 전체 합이 max_items를 넘으면 거기서 멈춘다.
+    2단계: 남은 자리를 전체 잔여에서 중요도순으로 채우되,
+           한 섹션이 max_per_section을 넘지 않게 한다.
+
+    어떤 설정 조합이든 총량은 max_items를 절대 넘지 않는다.
+    전체가 max_items 이하여도 섹션당 상한(max_per_section)은 항상 적용된다.
+    min_per_section > max_per_section이면 max_per_section으로 내린다.
     """
-    flat = [(number, g) for number, groups in per_section.items() for g in groups]
-    if len(flat) <= max_items:
-        return per_section
+    total = sum(len(gs) for gs in per_section.values())
 
-    # 중요도 높은 순. 같은 점수면 관련 기사가 많은(여러 매체가 다룬) 묶음 우선.
-    flat.sort(key=lambda t: (t[1].primary.importance, len(t[1].related)), reverse=True)
-    dropped = len(flat) - max_items
-    flat = flat[:max_items]
+    # 모순 방지: 최소 보장이 섹션당 상한보다 크면 상한으로 내림
+    effective_min = min(min_per_section, max_per_section)
 
-    capped: dict[int, list[ArticleGroup]] = {}
-    for number, group in flat:
-        capped.setdefault(number, []).append(group)
+    _sort_key = lambda g: (g.primary.importance, len(g.related))
 
-    logger.info(f"  분량 제한: 상위 {max_items}건만 발송 ({dropped}건 제외)")
-    return capped
+    # 각 섹션을 중요도 내림차순 큐로 준비
+    queues: dict[int, list[ArticleGroup]] = {
+        n: sorted(gs, key=_sort_key, reverse=True)
+        for n, gs in per_section.items()
+    }
 
+    # 1. 최소 보장 — 돌아가며 1건씩 (순서 편향 방지)
+    # 모든 섹션이 1건씩 받은 뒤 2건, 3건... effective_min까지 반복.
+    # 예산이 떨어지면 거기서 멈춘다.
+    kept: dict[int, list[ArticleGroup]] = {n: [] for n in queues}
+    budget = max_items
+
+    for round_i in range(effective_min):
+        if budget <= 0:
+            break
+        for n in queues:
+            if budget <= 0:
+                break
+            if len(kept[n]) > round_i:
+                continue  # 이미 이 라운드까지 받음
+            if not queues[n]:
+                continue  # 이 섹션에 더 줄 게 없음
+            kept[n].append(queues[n].pop(0))
+            budget -= 1
+
+    # 남은 기사를 2단계 풀로 — 중요도별 묶음
+    leftover: list[tuple[int, ArticleGroup]] = [
+        (n, g) for n, q in queues.items() for g in q
+    ]
+    leftover.sort(key=lambda t: _sort_key(t[1]), reverse=True)
+
+    # 2. 같은 중요도 안에서는 섹션을 돌아가며 하나씩 (순서 편향 방지)
+    i = 0
+    while i < len(leftover) and budget > 0:
+        # 현재 중요도 레벨의 항목들을 섹션별로 분류
+        level_key = _sort_key(leftover[i][1])
+        by_sec: dict[int, list[ArticleGroup]] = {}
+        start = i
+        while i < len(leftover) and _sort_key(leftover[i][1]) == level_key:
+            n, g = leftover[i]
+            by_sec.setdefault(n, []).append(g)
+            i += 1
+
+        # 이 레벨 안에서 돌아가며 채움
+        while budget > 0:
+            took = False
+            for n in list(by_sec):
+                if budget <= 0:
+                    break
+                if not by_sec[n]:
+                    continue
+                if len(kept.get(n, [])) >= max_per_section:
+                    by_sec[n] = []  # 이 섹션은 더 이상 받지 않음
+                    continue
+                kept.setdefault(n, []).append(by_sec[n].pop(0))
+                budget -= 1
+                took = True
+            if not took:
+                break
+
+    sent = sum(len(v) for v in kept.values())
+    dropped = total - sent
+    logger.info(
+        f"  분량 제한: {sent}건 발송 "
+        f"({dropped}건 제외, 섹션당 최소 {effective_min}/최대 {max_per_section})"
+    )
+    return kept
 
 def _is_same_issue(a: Article, b: Article) -> bool:
     """두 기사가 같은 사건을 다루는지 판단 (제목 유사도만 사용)
