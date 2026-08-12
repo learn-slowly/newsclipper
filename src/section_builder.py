@@ -59,7 +59,7 @@ SECTION_DEFS = [
 ]
 
 # Phase 1 활성화 섹션 번호 (2026-07-03: 연대정당 섹션 9 활성화)
-PHASE1_ACTIVE = {1, 2, 6, 7, 8, 9}
+PHASE1_ACTIVE = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 # 발송 기준 중요도 기본값 (keywords.yaml의 min_importance로 재정의 가능)
 DEFAULT_MIN_IMPORTANCE = 4
