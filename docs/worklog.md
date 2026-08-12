@@ -44,3 +44,8 @@
 - telegram_push.py: 📢 대응필요 + 📌 참고 논평/없음 표시 (그룹 있는/없는 경로 모두)
 - GitHub Actions: JPNEWS_SHEETS_CREDENTIALS/JPNEWS_SHEET_ID 시크릿 추가, 수동 실행 성공 (논평 108건 로드, 발송 성공)
 - 테스트 37개 전부 통과 (기존 18 + 논평 표시 13 + 분류 파싱 6)
+
+## 2026-08-12 — 여성·청년·복지 섹션 활성화 + jpnews 빈칸 채우기
+
+- section_builder.py: PHASE1_ACTIVE에 3, 4, 5 추가 → 9개 섹션 전부 활성화
+- jpnews 구글시트 빈칸 채우기: 2,615건 중 2,613건 완료 (99.9%), 2건은 분류 불가
