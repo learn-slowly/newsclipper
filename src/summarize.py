@@ -29,7 +29,7 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "summarize.txt"
 IMPORTANCE_THRESHOLD = 4
 
 # 월 비용 초과 시 상향되는 임계값
-IMPORTANCE_THRESHOLD_HIGH = 4
+IMPORTANCE_THRESHOLD_HIGH = 5
 
 # 월 비용 한도 (달러)
 MONTHLY_COST_LIMIT = 30.0
