@@ -9,6 +9,7 @@
 - 정리: .env.example 이메일 줄, pyproject.toml email 의존성
 - PRD.md: 이메일 항목 완료 처리, worklog 참조 추가
 - todolist: 이메일 항목 제거, 번호 재정렬
+- 정정: CLAUDE.md 실제 9.5KB (약 7KB는 오기), jinja2 의존성도 제거
 
 ## 2026-08-12 — 섹션별 최소 보장 + 섹션당 상한
 
