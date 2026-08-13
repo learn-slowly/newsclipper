@@ -1,7 +1,9 @@
-name: Daily Briefing
+name: Weekly Summary
 
 on:
-  # cron-job.org에서 workflow_dispatch로 트리거 (아침 7시, 저녁 7시 KST)
+  # 매주 월요일 아침 8시 KST (일요일 23:00 UTC)
+  schedule:
+    - cron: '0 23 * * 0'
   workflow_dispatch:
 
 concurrency:
@@ -12,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  briefing:
+  weekly:
     runs-on: ubuntu-latest
 
     steps:
@@ -32,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
 
-      - name: Run briefing pipeline
+      - name: Run weekly summary pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -41,10 +43,8 @@ jobs:
           TELEGRAM_ADMIN_USER_ID: ${{ secrets.TELEGRAM_ADMIN_USER_ID }}
           LOG_LEVEL: INFO
           TIMEZONE: Asia/Seoul
-          JPNEWS_SHEETS_CREDENTIALS: ${{ secrets.JPNEWS_SHEETS_CREDENTIALS }}
-          JPNEWS_SHEET_ID: ${{ secrets.JPNEWS_SHEET_ID }}
         run: |
-          python -m src.main
+          python -m src.main --mode weekly
 
       - name: Commit DB changes
         if: always()
@@ -53,14 +53,6 @@ jobs:
           git config user.email "bot@clipboard055"
           git add state/seen.db
           if ! git diff --cached --quiet; then
-            git commit -m "chore: DB 업데이트 ($(date +%Y-%m-%d))"
+            git commit -m "chore: DB 업데이트 (주간 요약)"
             git push
           fi
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: briefing-logs-${{ github.run_number }}
-          path: logs/
-          retention-days: 7

@@ -17,6 +17,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+import argparse
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -26,13 +27,26 @@ from src.classify import classify_articles
 from src.keyword_boost import apply_keyword_boost, apply_trusted_boost, load_keywords, prefilter_articles
 from src.scrape import scrape_all
 from src.dedupe import deduplicate_similar, filter_seen
-from src.section_builder import DEFAULT_MAX_ITEMS, DEFAULT_MAX_PER_SECTION, DEFAULT_MIN_IMPORTANCE, DEFAULT_MIN_PER_SECTION, PHASE1_ACTIVE, build_sections
+from src.section_builder import (
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_MAX_PER_SECTION,
+    DEFAULT_MIN_IMPORTANCE,
+    DEFAULT_MIN_PER_SECTION,
+    PHASE1_ACTIVE,
+    build_sections,
+)
 from src.storage import Storage
 from src.summarize import summarize_articles
-from src.telegram_push import format_briefing, send_error_alert, send_telegram
+from src.telegram_push import (
+    format_briefing,
+    send_error_alert,
+    send_telegram,
+    format_alert_message,
+    format_weekly_summary_message,
+)
 from src.jpnews_reader import read_statements, find_matching_statement
-
-
+from src.issue_tracker import attach_issue_context
+from src.weekly_summary import generate_weekly_summary
 # ── 로거 설정 ─────────────────────────────────
 def setup_logger():
     """로거 초기화"""
@@ -223,6 +237,10 @@ async def run_pipeline():
                 await send_error_alert(failure_alert, bot_token, admin_id)
             return
 
+        # 4-f. 이슈 경과 맥락 부여
+        logger.info("📋 Step 4-f: 이슈 경과 맥락 부여")
+        articles = attach_issue_context(articles, storage)
+
         # 중요도 1점 제거
         articles = [a for a in articles if a.importance > 1]
         logger.info(f"중요도 2점 이상: {len(articles)}건")
@@ -356,9 +374,196 @@ async def run_pipeline():
     logger.info("=" * 50)
 
 
+
+async def run_alert_pipeline():
+    """속보 점검 파이프라인 (중요도 5점 즉시 발송)"""
+    setup_logger()
+
+    logger.info("=" * 50)
+    logger.info("🚨 clipboard055 속보 점검 시작")
+    logger.info(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 50)
+
+    load_dotenv()
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
+    admin_id = os.getenv("TELEGRAM_ADMIN_USER_ID", "")
+
+    if not openai_key or not bot_token or not channel_id:
+        logger.error("필수 환경변수가 설정되지 않았습니다")
+        return
+
+    storage = Storage()
+
+    try:
+        all_feeds = load_feeds()
+        trusted_sources = {f["name"] for f in all_feeds if f.get("trusted", True) is True}
+        from src.scrape import load_scrape_config
+        scrape_sources = load_scrape_config()
+        for s in scrape_sources:
+            trusted_sources.add(s["name"])
+
+        # 1. 수집
+        articles = collect_all(hours=6)
+        articles.extend(scrape_all())
+        if not articles:
+            logger.info("수집된 기사가 없습니다")
+            return
+
+        # URL 중복 제거
+        seen_urls = set()
+        unique = []
+        for a in articles:
+            if a.url not in seen_urls:
+                seen_urls.add(a.url)
+                unique.append(a)
+        articles = unique
+
+        # DB 중복 제거 (정기 브리핑 seen + 이미 속보 점검한 alert_seen)
+        seen_hashes = storage.get_seen_hashes().union(storage.get_alert_seen_hashes())
+        articles = [a for a in articles if a.url_hash not in seen_hashes]
+        if not articles:
+            logger.info("신규 기사가 없습니다")
+            return
+
+        # 제목 유사도 중복 제거
+        articles = deduplicate_similar(articles)
+        if not articles:
+            return
+
+        # 사전 키워드 필터
+        articles, _ = prefilter_articles(articles, trusted_sources)
+        if not articles:
+            logger.info("키워드 필터 후 기사가 없습니다")
+            return
+
+        # 분류 (Luna)
+        articles, classify_in, classify_out = classify_articles(articles, openai_key)
+        articles = apply_keyword_boost(articles)
+        articles = apply_trusted_boost(articles, trusted_sources)
+
+        # 분류 성공 기사 중 5점 미만 기사만 alert_seen 기록 (미발송 상태, 재분류 방지)
+        # 5점 기사는 텔레그램 발송이 성공했을 때만 alert_seen에 기록하여 실패 시 다음 실행 때 재시도할 수 있게 함.
+        non_urgent = [a for a in articles if a.classified_ok and a.importance < 5]
+        for article in non_urgent:
+            storage.mark_alert_processed(
+                article.url_hash, article.url, article.title, article.importance, sent_alert=False
+            )
+        # 중요도 5점 기사만 추출
+        urgent_articles = [a for a in articles if a.importance == 5]
+        if not urgent_articles:
+            logger.info("속보 대상(중요도 5점) 기사가 없습니다")
+            return
+
+        # 이슈 맥락 부여
+        urgent_articles = attach_issue_context(urgent_articles, storage)
+
+        logger.info(f"🚨 속보 대상 {len(urgent_articles)}건 발송 시도")
+        alert_text = format_alert_message(urgent_articles)
+        sent = await send_telegram(alert_text, bot_token, channel_id)
+
+        if sent:
+            for a in urgent_articles:
+                storage.mark_alert_processed(
+                    a.url_hash, a.url, a.title, a.importance, sent_alert=True
+                )
+            cost = calculate_cost(classify_in, classify_out, 0, 0)
+            today = datetime.now().strftime("%Y-%m-%d")
+            storage.save_briefing(
+                date=today,
+                article_count=len(urgent_articles),
+                sent_telegram=True,
+                haiku_tokens_in=classify_in,
+                haiku_tokens_out=classify_out,
+                estimated_cost_usd=cost,
+            )
+            logger.info("속보 알림 발송 완료")
+        else:
+            logger.error("속보 알림 텔레그램 발송 실패")
+
+    except Exception as e:
+        logger.exception(f"속보 파이프라인 오류: {e}")
+        if admin_id and bot_token:
+            await send_error_alert(f"속보 파이프라인 오류: {e}", bot_token, admin_id)
+
+
+async def run_weekly_pipeline():
+    """주간 요약 보고서 파이프라인"""
+    setup_logger()
+
+    logger.info("=" * 50)
+    logger.info("📊 clipboard055 주간 요약 보고서 시작")
+    logger.info(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 50)
+
+    load_dotenv()
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
+    admin_id = os.getenv("TELEGRAM_ADMIN_USER_ID", "")
+
+    if not api_key or not bot_token or not channel_id:
+        logger.error("필수 환경변수가 설정되지 않았습니다 (ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID)")
+        return
+
+    storage = Storage()
+
+    try:
+        summary_text, start_str, end_str, total_cnt, sonnet_in, sonnet_out = (
+            generate_weekly_summary(storage, api_key, days=7)
+        )
+
+        if not summary_text:
+            logger.warning("생성된 주간 요약 내용이 없습니다")
+            return
+
+        msg_text = format_weekly_summary_message(
+            summary_text, start_str, end_str, total_cnt
+        )
+        sent = await send_telegram(msg_text, bot_token, channel_id)
+
+        if sent:
+            cost = calculate_cost(0, 0, sonnet_in, sonnet_out)
+            today = datetime.now().strftime("%Y-%m-%d")
+            storage.save_briefing(
+                date=today,
+                article_count=total_cnt,
+                sent_telegram=True,
+                sonnet_tokens_in=sonnet_in,
+                sonnet_tokens_out=sonnet_out,
+                estimated_cost_usd=cost,
+            )
+            logger.info("주간 요약 보고서 발송 완료")
+        else:
+            logger.error("주간 요약 텔레그램 발송 실패")
+
+    except Exception as e:
+        logger.exception(f"주간 요약 파이프라인 오류: {e}")
+        if admin_id and bot_token:
+            await send_error_alert(f"주간 요약 파이프라인 오류: {e}", bot_token, admin_id)
+
+
 def main():
-    """진입점"""
-    asyncio.run(run_pipeline())
+    """진입점 (CLI 모드 파싱)"""
+    parser = argparse.ArgumentParser(description="clipboard055 뉴스 브리핑 시스템")
+    parser.add_argument(
+        "--mode",
+        choices=["briefing", "alert", "weekly"],
+        default="briefing",
+        help="실행 모드: briefing(정기 브리핑), alert(속보 점검), weekly(주간 요약)",
+    )
+    args = parser.parse_args()
+
+    if args.mode == "alert":
+        asyncio.run(run_alert_pipeline())
+    elif args.mode == "weekly":
+        asyncio.run(run_weekly_pipeline())
+    else:
+        asyncio.run(run_pipeline())
+
 
 
 if __name__ == "__main__":

@@ -43,12 +43,15 @@ def _format_article(article: Article, statement=None) -> str:
     title_suffix = f" {LOW_CONTENT_MARKER}" if article.low_content else ""
     line = f"{prefix}[{article.importance}|{scope_label}] {article.title}{title_suffix}"
 
+    # 이슈 경과 맥락 표시
+    if article.ongoing_context:
+        line += f"\n   {article.ongoing_context}"
+
     # AI 코멘트가 있으면 추가
     if article.ai_comment:
         line += f"\n   → {article.ai_comment}"
 
     line += f"\n   {article.url}"
-
     # 대응 필요(high) 기사에 중앙당 논평 표시
     if getattr(article, "response_needed", "") == "high":
         if statement:
@@ -81,11 +84,14 @@ def _format_group(group: ArticleGroup, statement=None) -> str:
 
     line = f"{prefix}[{primary.importance}|{scope_label}] {primary.title}{title_suffix}"
 
+    # 이슈 경과 맥락 표시
+    if primary.ongoing_context:
+        line += f"\n   {primary.ongoing_context}"
+
     if primary.ai_comment:
         line += f"\n   → {primary.ai_comment}"
 
     line += f"\n   {primary.url}"
-
     # 관련 기사가 있으면 출처 + 링크 추가
     if group.related:
         line += f"\n   📎 관련 {len(group.related)}건:"
@@ -155,6 +161,42 @@ def format_briefing(
 
     return header + "\n\n" + "\n\n".join(section_texts)
 
+
+def format_alert_message(articles: list[Article]) -> str:
+    """속보 전용 텔레그램 메시지 생성"""
+    tz = ZoneInfo(os.getenv("TIMEZONE", "Asia/Seoul"))
+    now = datetime.now(tz)
+    time_str = now.strftime("%Y-%m-%d %H:%M")
+
+    header = f"🚨 [속보] 중요 뉴스 긴급 알림 | {time_str}"
+
+    items = []
+    for a in articles:
+        scope_label = _format_scope(a.scope)
+        item = f"🔥 [5|{scope_label}] [{a.source}] {a.title}"
+        if a.summary:
+            # summary의 첫 100자만 간략히
+            short_sum = a.summary.strip().replace("\n", " ")
+            if len(short_sum) > 100:
+                short_sum = short_sum[:100] + "..."
+            item += f"\n   → {short_sum}"
+        if a.ongoing_context:
+            item += f"\n   {a.ongoing_context}"
+        item += f"\n   {a.url}"
+        items.append(item)
+
+    return header + "\n\n" + "\n\n".join(items)
+
+
+def format_weekly_summary_message(
+    summary_text: str, start_date: str, end_date: str, total_articles: int
+) -> str:
+    """주간 요약 보고서 메시지 생성"""
+    header = (
+        f"📊 [주간 브리핑] 경남도당 이슈 주간 리포트\n"
+        f"📅 {start_date} ~ {end_date} (수집 총 {total_articles}건)"
+    )
+    return header + "\n\n" + summary_text
 
 def split_message(text: str) -> list[str]:
     """텔레그램 4096자 제한에 맞게 메시지 분할

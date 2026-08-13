@@ -56,11 +56,20 @@ class Storage:
                     scope TEXT DEFAULT '',
                     ai_summary TEXT DEFAULT '',
                     ai_comment TEXT DEFAULT '',
+                    response_needed TEXT DEFAULT 'none',
                     briefing_date TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     UNIQUE(url_hash, briefing_date)
                 )
             """)
+
+            # 마이그레이션: response_needed 컬럼이 없으면 추가
+            cursor.execute("PRAGMA table_info(articles)")
+            cols = {row[1] for row in cursor.fetchall()}
+            if "response_needed" not in cols:
+                cursor.execute(
+                    "ALTER TABLE articles ADD COLUMN response_needed TEXT DEFAULT 'none'"
+                )
 
             # 브리핑 실행 기록 테이블
             cursor.execute("""
@@ -75,6 +84,18 @@ class Storage:
                     sonnet_tokens_in INTEGER DEFAULT 0,
                     sonnet_tokens_out INTEGER DEFAULT 0,
                     estimated_cost_usd REAL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            # 속보 점검 기록 테이블 (속보 모드에서 분류된 기사 추적)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS alert_seen (
+                    url_hash TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    importance INTEGER DEFAULT 0,
+                    sent_alert INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
             """)
@@ -101,6 +122,10 @@ class Storage:
                 ON articles(importance)
             """)
 
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alert_seen_created
+                ON alert_seen(created_at)
+            """)
             conn.commit()
             logger.debug("데이터베이스 초기화 완료")
 
@@ -135,8 +160,8 @@ class Storage:
                 """INSERT OR IGNORE INTO articles
                    (url_hash, url, title, source, summary, published_at,
                     category, importance, scope, ai_summary, ai_comment,
-                    briefing_date, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    response_needed, briefing_date, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     article.url_hash,
                     article.url,
@@ -149,6 +174,7 @@ class Storage:
                     article.scope,
                     article.ai_summary,
                     article.ai_comment,
+                    getattr(article, "response_needed", "none"),
                     briefing_date,
                     datetime.now().isoformat(),
                 ),
@@ -164,8 +190,8 @@ class Storage:
                     """INSERT OR IGNORE INTO articles
                        (url_hash, url, title, source, summary, published_at,
                         category, importance, scope, ai_summary, ai_comment,
-                        briefing_date, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        response_needed, briefing_date, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         article.url_hash,
                         article.url,
@@ -178,6 +204,7 @@ class Storage:
                         article.scope,
                         article.ai_summary,
                         article.ai_comment,
+                        getattr(article, "response_needed", "none"),
                         briefing_date,
                         datetime.now().isoformat(),
                     ),
@@ -236,14 +263,75 @@ class Storage:
             return cursor.fetchone()[0]
 
     def cleanup_old_records(self, days: int = 30):
-        """오래된 seen 레코드 삭제 (articles는 보존)"""
+        """오래된 seen 및 alert_seen 레코드 삭제 (articles는 보존)"""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM seen WHERE first_seen_at < ?", (cutoff,))
-            deleted = cursor.rowcount
+            deleted_seen = cursor.rowcount
+            cursor.execute("DELETE FROM alert_seen WHERE created_at < ?", (cutoff,))
+            deleted_alert = cursor.rowcount
             conn.commit()
 
-        if deleted > 0:
-            logger.info(f"오래된 seen 레코드 {deleted}건 삭제")
+        if deleted_seen > 0 or deleted_alert > 0:
+            logger.info(f"오래된 기록 정리 완료 (seen {deleted_seen}건, alert_seen {deleted_alert}건 삭제)")
+
+    def get_recent_articles(self, days: int = 7) -> list[dict]:
+        """최근 N일간 저장된 기사 목록 반환 (이슈 추적 및 주간 요약용)"""
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT url_hash, url, title, source, summary, published_at,
+                          category, importance, scope, ai_summary, ai_comment,
+                          response_needed, briefing_date, created_at
+                   FROM articles
+                   WHERE briefing_date >= ?
+                   ORDER BY briefing_date DESC, importance DESC""",
+                (cutoff,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def is_alert_processed(self, url_hash: str) -> bool:
+        """속보 점검에서 이미 처리했는지 확인"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM alert_seen WHERE url_hash = ?",
+                (url_hash,),
+            )
+            return cursor.fetchone() is not None
+    def get_alert_seen_hashes(self, days: int = 7) -> Set[str]:
+        """최근 N일간 속보 점검으로 처리된 url_hash 목록"""
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT url_hash FROM alert_seen WHERE created_at >= ?",
+                (cutoff,),
+            )
+            return {row[0] for row in cursor.fetchall()}
+
+    def mark_alert_processed(
+        self, url_hash: str, url: str, title: str, importance: int, sent_alert: bool
+    ):
+        """속보 점검 기사 처리 기록"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR REPLACE INTO alert_seen
+                   (url_hash, url, title, importance, sent_alert, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    url_hash,
+                    url,
+                    title,
+                    importance,
+                    1 if sent_alert else 0,
+                    datetime.now().isoformat(),
+                ),
+            )
+            conn.commit()

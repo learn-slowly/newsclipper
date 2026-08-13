@@ -52,3 +52,13 @@
 - jpnews 나머지 2건 수동 처리 (이모지 전용 메시지 → "기타"로 채움, 빈 행 0건 달성)
 - summarize.py: 비용 안전장치 수리 — IMPORTANCE_THRESHOLD_HIGH 4→5 (월 $30 초과 시 실제 작동)
 - 비용 안전장치 테스트 3개 추가 ($30 경계에서 4점/5점 동작 검증, 테스트 40개 통과)
+
+## 2026-08-13 — Phase 4: 실용성 강화 (이슈 추적 + 속보 알림 + 주간 요약)
+
+- main.py: --mode CLI 인자 추가 (briefing / alert / weekly 지원)
+- issue_tracker.py: 최근 7일 DB 기사 제목 유사도(0.45) 기반 이슈 경과 추적 ("📋 N일째 진행 중") 추가
+- telegram_push.py: 이슈 경과 맥락 표시 + 속보(🚨) 및 주간 요약(📊) 메시지 포맷 함수 추가
+- storage.py: alert_seen 테이블 추가 (속보 점검 중복 발송 및 재분류 방지), get_recent_articles 추가
+- weekly_summary.py: 지난 7일 기사 분석 및 Sonnet 4.6 기반 월요일 주간 리포트 생성 기능 추가
+- Workflows: .github/workflows/alert-check.yml (3시간 간격) 및 weekly-summary.yml (월요일 8시 KST) 생성
+- 테스트: 총 46개 테스트 통과 (새 기능 단위 테스트 6개 추가)

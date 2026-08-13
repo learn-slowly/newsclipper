@@ -68,6 +68,10 @@ class Article:
     # 수집 단계 seen 기록 시 성공한 기사만 기록해 장애 기사 복구를 가능하게 한다.
     classified_ok: bool = False
 
+    # 이슈 경과 추적 (issue_tracker.py에서 채움)
+    # 예: "📋 3일째 진행 중 (이번 주 12건)"
+    ongoing_context: str = ""
+
     def __post_init__(self):
         """URL 해시 자동 생성"""
         if not self.url_hash and self.url:
