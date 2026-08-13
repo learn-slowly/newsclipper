@@ -94,6 +94,16 @@ def calculate_cost(
     )
 
 
+def is_urgent_article(article: Article, urgent_keywords: list[str]) -> bool:
+    """속보 대상 기사인지 판정 (중요도 5점 OR 중요도 4점 이상 + 속보 긴급 키워드 포함)"""
+    if article.importance == 5:
+        return True
+    if article.importance >= 4 and urgent_keywords:
+        text = f"{article.title} {article.summary}"
+        return any(kw in text for kw in urgent_keywords)
+    return False
+
+
 # ── 분류 전멸 감지 ────────────────────────────────
 def build_classify_failure_alert(total: int, ok: int) -> str | None:
     """분류 성공이 0건이면 관리자 경고 메시지를 만든다. 정상이면 None.
@@ -447,24 +457,18 @@ async def run_alert_pipeline():
         # 속보 판정 (중요도 5점 OR 중요도 4점 이상 + 속보 긴급 키워드 포함)
         settings = load_keywords()
         urgent_keywords = settings.get("urgent_keywords", [])
-
-        def is_urgent(a: Article) -> bool:
-            if a.importance == 5:
-                return True
-            if a.importance >= 4 and urgent_keywords:
-                text = f"{a.title} {a.summary}"
-                return any(kw in text for kw in urgent_keywords)
-            return False
-
         # 비속보 기사는 alert_seen에 미리 기록 (미발송 상태, 재분류 방지)
-        non_urgent = [a for a in articles if a.classified_ok and not is_urgent(a)]
+        non_urgent = [
+            a for a in articles
+            if a.classified_ok and not is_urgent_article(a, urgent_keywords)
+        ]
         for article in non_urgent:
             storage.mark_alert_processed(
                 article.url_hash, article.url, article.title, article.importance, sent_alert=False
             )
 
         # 속보 대상 추출
-        urgent_articles = [a for a in articles if is_urgent(a)]
+        urgent_articles = [a for a in articles if is_urgent_article(a, urgent_keywords)]
         if not urgent_articles:
             logger.info("속보 대상 기사가 없습니다")
             return

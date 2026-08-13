@@ -173,7 +173,7 @@ def format_alert_message(articles: list[Article]) -> str:
     items = []
     for a in articles:
         scope_label = _format_scope(a.scope)
-        item = f"🔥 [5|{scope_label}] [{a.source}] {a.title}"
+        item = f"🔥 [{a.importance}|{scope_label}] [{a.source}] {a.title}"
         if a.summary:
             # summary의 첫 100자만 간략히
             short_sum = a.summary.strip().replace("\n", " ")
