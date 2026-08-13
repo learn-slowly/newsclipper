@@ -26,3 +26,29 @@ def test_분류_일부_성공시_경고_없음():
 def test_기사_0건이면_경고_없음():
     """수집된 기사 자체가 없으면 API 장애가 아니므로 경고하지 않는다"""
     assert build_classify_failure_alert(total=0, ok=0) is None
+from unittest.mock import patch
+from src.main import main
+
+
+@patch("src.main.run_pipeline")
+def test_main_cli_default_mode(mock_run):
+    """기본 실행 모드는 briefing 파이프라인 호출"""
+    with patch("sys.argv", ["main.py"]):
+        main()
+    mock_run.assert_called_once()
+
+
+@patch("src.main.run_alert_pipeline")
+def test_main_cli_alert_mode(mock_run_alert):
+    """--mode alert 실행 시 속보 파이프라인 호출"""
+    with patch("sys.argv", ["main.py", "--mode", "alert"]):
+        main()
+    mock_run_alert.assert_called_once()
+
+
+@patch("src.main.run_weekly_pipeline")
+def test_main_cli_weekly_mode(mock_run_weekly):
+    """--mode weekly 실행 시 주간 요약 파이프라인 호출"""
+    with patch("sys.argv", ["main.py", "--mode", "weekly"]):
+        main()
+    mock_run_weekly.assert_called_once()

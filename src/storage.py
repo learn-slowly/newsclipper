@@ -278,9 +278,8 @@ class Storage:
             logger.info(f"오래된 기록 정리 완료 (seen {deleted_seen}건, alert_seen {deleted_alert}건 삭제)")
 
     def get_recent_articles(self, days: int = 7) -> list[dict]:
-        """최근 N일간 저장된 기사 목록 반환 (이슈 추적 및 주간 요약용)"""
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
+        """최근 N일간 저장된 기사 목록 반환 (이슈 추적 및 주간 요약용, 오늘 포함 N일)"""
+        cutoff = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()

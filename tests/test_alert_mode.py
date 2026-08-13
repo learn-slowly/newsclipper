@@ -44,3 +44,21 @@ def test_storage_alert_seen():
 
         assert storage.is_alert_processed(url_hash)
         assert url_hash in storage.get_alert_seen_hashes(days=7)
+from src.telegram_push import split_message, MAX_MESSAGE_LENGTH
+
+
+def test_split_message_oversized_no_double_newline():
+    """\n\n이 없는 4096자 초과 단락도 4096자 이하로 안전하게 분할된다"""
+    oversized_text = "A" * 5000
+    chunks = split_message(oversized_text)
+
+    assert len(chunks) > 1
+    for c in chunks:
+        assert len(c) <= MAX_MESSAGE_LENGTH
+
+    oversized_lines = ("B" * 3000) + "\n" + ("C" * 3000)
+    chunks_lines = split_message(oversized_lines)
+
+    assert len(chunks_lines) == 2
+    for c in chunks_lines:
+        assert len(c) <= MAX_MESSAGE_LENGTH

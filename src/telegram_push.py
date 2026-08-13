@@ -201,31 +201,41 @@ def format_weekly_summary_message(
 def split_message(text: str) -> list[str]:
     """텔레그램 4096자 제한에 맞게 메시지 분할
 
-    섹션 경계(\n\n 두 번)에서 나눈다.
+    \n\n(섹션) -> \n(줄) -> 글자 수 하드 컷 순으로 4096자 제한 준수
     """
     if len(text) <= MAX_MESSAGE_LENGTH:
         return [text]
 
-    messages = []
-    current = ""
+    def _split_chunk(chunk: str, sep: str, next_sep: str | None) -> list[str]:
+        if len(chunk) <= MAX_MESSAGE_LENGTH:
+            return [chunk]
+        res = []
+        subparts = chunk.split(sep)
+        curr = ""
+        for p in subparts:
+            if len(p) > MAX_MESSAGE_LENGTH:
+                if curr:
+                    res.append(curr)
+                    curr = ""
+                if next_sep is not None:
+                    res.extend(_split_chunk(p, next_sep, None))
+                else:
+                    for i in range(0, len(p), MAX_MESSAGE_LENGTH):
+                        res.append(p[i:i+MAX_MESSAGE_LENGTH])
+                continue
 
-    # 섹션 단위로 분할 (빈 줄 두 개 = 섹션 구분)
-    parts = text.split("\n\n")
+            delim = sep if (curr and sep) else ""
+            if len(curr) + len(delim) + len(p) > MAX_MESSAGE_LENGTH:
+                if curr:
+                    res.append(curr)
+                curr = p
+            else:
+                curr = curr + delim + p if curr else p
+        if curr:
+            res.append(curr)
+        return res
 
-    for part in parts:
-        candidate = current + ("\n\n" if current else "") + part
-
-        if len(candidate) > MAX_MESSAGE_LENGTH:
-            if current:
-                messages.append(current)
-            current = part
-        else:
-            current = candidate
-
-    if current:
-        messages.append(current)
-
-    return messages
+    return _split_chunk(text, "\n\n", "\n")
 
 
 async def send_telegram(

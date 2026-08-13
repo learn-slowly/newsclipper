@@ -39,7 +39,7 @@ def generate_weekly_summary(
         return "", "", "", 0, 0, 0
 
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=days)
+    start_date = end_date - timedelta(days=days - 1)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
