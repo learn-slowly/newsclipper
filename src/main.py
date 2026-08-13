@@ -444,17 +444,29 @@ async def run_alert_pipeline():
         articles = apply_keyword_boost(articles)
         articles = apply_trusted_boost(articles, trusted_sources)
 
-        # 분류 성공 기사 중 5점 미만 기사만 alert_seen 기록 (미발송 상태, 재분류 방지)
-        # 5점 기사는 텔레그램 발송이 성공했을 때만 alert_seen에 기록하여 실패 시 다음 실행 때 재시도할 수 있게 함.
-        non_urgent = [a for a in articles if a.classified_ok and a.importance < 5]
+        # 속보 판정 (중요도 5점 OR 중요도 4점 이상 + 속보 긴급 키워드 포함)
+        settings = load_keywords()
+        urgent_keywords = settings.get("urgent_keywords", [])
+
+        def is_urgent(a: Article) -> bool:
+            if a.importance == 5:
+                return True
+            if a.importance >= 4 and urgent_keywords:
+                text = f"{a.title} {a.summary}"
+                return any(kw in text for kw in urgent_keywords)
+            return False
+
+        # 비속보 기사는 alert_seen에 미리 기록 (미발송 상태, 재분류 방지)
+        non_urgent = [a for a in articles if a.classified_ok and not is_urgent(a)]
         for article in non_urgent:
             storage.mark_alert_processed(
                 article.url_hash, article.url, article.title, article.importance, sent_alert=False
             )
-        # 중요도 5점 기사만 추출
-        urgent_articles = [a for a in articles if a.importance == 5]
+
+        # 속보 대상 추출
+        urgent_articles = [a for a in articles if is_urgent(a)]
         if not urgent_articles:
-            logger.info("속보 대상(중요도 5점) 기사가 없습니다")
+            logger.info("속보 대상 기사가 없습니다")
             return
 
         # 이슈 맥락 부여

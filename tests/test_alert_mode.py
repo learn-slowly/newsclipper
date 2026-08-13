@@ -62,3 +62,12 @@ def test_split_message_oversized_no_double_newline():
     assert len(chunks_lines) == 2
     for c in chunks_lines:
         assert len(c) <= MAX_MESSAGE_LENGTH
+from src.keyword_boost import load_keywords
+
+def test_urgent_keywords_configuration():
+    """config/keywords.yaml에 urgent_keywords 항목이 올바르게 정의되어 있는지 검증"""
+    settings = load_keywords()
+    urgent = settings.get("urgent_keywords", [])
+    assert isinstance(urgent, list)
+    assert "중대재해" in urgent
+    assert "탄핵" in urgent
