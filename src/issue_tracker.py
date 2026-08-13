@@ -59,23 +59,28 @@ def attach_issue_context(
 
             similarity = _title_similarity(article.title, past["title"])
             if similarity >= TITLE_SIMILARITY_THRESHOLD:
-                past_date = past.get("briefing_date") or past.get("created_at", "")[:10]
-                if past_date:
-                    matched_dates.add(past_date)
+                past_date_str = past.get("briefing_date") or past.get("created_at", "")[:10]
+                if past_date_str:
+                    try:
+                        matched_dates.add(datetime.strptime(past_date_str[:10], "%Y-%m-%d").date())
+                    except ValueError:
+                        pass
                 matched_total += 1
 
-        # 오늘 날짜 추가
-        matched_dates.add(today_str)
-        day_count = len(matched_dates)
+        today_date = datetime.now().date()
+        matched_dates.add(today_date)
+
+        earliest_date = min(matched_dates)
+        calendar_days = (today_date - earliest_date).days + 1
 
         # 2건 이상 묶이거나 2일 이상 이어진 경우 맥락 표시
         if matched_total >= 2:
-            if day_count >= 2:
+            if calendar_days >= 2:
                 article.ongoing_context = (
-                    f"📋 {day_count}일째 진행 중 (이번 주 {matched_total}건)"
+                    f"🔥 {calendar_days}일째 이어진 이슈 (총 {matched_total}건)"
                 )
             else:
-                article.ongoing_context = f"📋 이번 주 {matched_total}번째 관련 기사"
+                article.ongoing_context = f"📌 이번 주 {matched_total}번째 관련 기사"
             annotated_count += 1
 
     if annotated_count > 0:
