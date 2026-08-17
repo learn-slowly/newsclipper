@@ -45,6 +45,7 @@ from src.telegram_push import (
     format_weekly_summary_message,
 )
 from src.jpnews_reader import read_statements, find_matching_statement
+from src.jarchive_client import find_best_match as jarchive_find_match, JarchiveUnavailable
 from src.issue_tracker import attach_issue_context
 from src.weekly_summary import generate_weekly_summary
 # ── 로거 설정 ─────────────────────────────────
@@ -119,6 +120,33 @@ def build_classify_failure_alert(total: int, ok: int) -> str | None:
         )
     return None
 
+
+
+def _sheet_fallback_match(
+    high_articles: list[Article],
+    statement_map: dict,
+) -> None:
+    """구글 시트에서 논평을 읽어 대응 필요 기사에 매칭한다 (대체 경로).
+
+    jarchive 미설정이거나 접속 실패 시 사용.
+    statement_map을 직접 수정한다.
+    """
+    jpnews_creds = os.environ.get("JPNEWS_SHEETS_CREDENTIALS", "")
+    jpnews_sheet = os.environ.get("JPNEWS_SHEET_ID", "")
+    if not (jpnews_creds and jpnews_sheet):
+        logger.info("시트도 미설정 — 논평 매칭 없이 발송")
+        return
+    try:
+        statements = read_statements(jpnews_creds, jpnews_sheet, months=6)
+        matched = 0
+        for art in high_articles:
+            match = find_matching_statement(statements, art.category, art.title)
+            if match:
+                statement_map[art.url] = match
+                matched += 1
+        logger.info(f"시트 대체 매칭: 대응 필요 {len(high_articles)}건 / 매칭 {matched}건")
+    except Exception as e:
+        logger.warning(f"시트 논평 매칭도 실패 (브리핑은 계속): {e}")
 
 # ── 메인 파이프라인 ──────────────────────────────
 async def run_pipeline():
@@ -306,33 +334,42 @@ async def run_pipeline():
         if cost > DAILY_COST_WARNING:
             logger.warning(f"⚠️ 일일 비용 경고! ${cost:.4f} > ${DAILY_COST_WARNING}")
 
-        # 7. 중앙당 논평 매칭 (대응 필요 기사에 참고 논평 연결)
-        logger.info("📌 Step 7: 중앙당 논평 매칭")
-        jpnews_creds = os.environ.get("JPNEWS_SHEETS_CREDENTIALS", "")
-        jpnews_sheet = os.environ.get("JPNEWS_SHEET_ID", "")
-        statement_map = {}  # article URL → Statement (기사별 매칭)
-        if jpnews_creds and jpnews_sheet:
+        # 7. 논평 매칭 (대응 필요 기사에 참고 논평 연결)
+        #    1순위: jarchive 검색 (뜻 검색 — 정확도 높음)
+        #    2순위: 구글 시트 직접 읽기 (jarchive 접속 안 될 때 대체)
+        logger.info("📌 Step 7: 논평 매칭")
+        jarchive_url = os.environ.get("JARCHIVE_API_URL", "")
+        statement_map = {}  # article URL → Statement/MatchedStatement
+
+        # 대응 필요(high) 기사 목록 먼저 모으기
+        high_articles = []
+        for s in sections:
+            for g in s.groups:
+                art = g.primary
+                if art.response_needed == "high":
+                    high_articles.append(art)
+
+        if not high_articles:
+            logger.info("대응 필요(high) 기사 0건 — 논평 매칭 건너뜀")
+        elif jarchive_url:
+            # 1순위: jarchive 검색
+            logger.info(f"jarchive 검색 시도 ({jarchive_url})")
             try:
-                statements = read_statements(jpnews_creds, jpnews_sheet, months=6)
-                high_count = 0
                 matched = 0
-                for s in sections:
-                    for g in s.groups:
-                        art = g.primary
-                        if art.response_needed != "high":
-                            continue
-                        high_count += 1
-                        match = find_matching_statement(
-                            statements, art.category, art.title,
-                        )
-                        if match:
-                            statement_map[art.url] = match
-                            matched += 1
-                logger.info(f"대응 필요(high) {high_count}건 / 논평 매칭 {matched}건")
-            except Exception as e:
-                logger.warning(f"논평 매칭 실패 (브리핑은 계속): {e}")
+                for art in high_articles:
+                    result = jarchive_find_match(jarchive_url, art.title, art.category)
+                    if result:
+                        statement_map[art.url] = result
+                        matched += 1
+                logger.info(f"대응 필요(high) {len(high_articles)}건 / jarchive 매칭 {matched}건")
+            except JarchiveUnavailable as e:
+                # jarchive 접속 실패 → 시트 대체
+                logger.warning(f"jarchive 접속 실패 — 시트 대체 전환: {e}")
+                statement_map = {}
+                _sheet_fallback_match(high_articles, statement_map)
         else:
-            logger.info("jpnews 시트 미설정 — 논평 매칭 건너뜀")
+            # jarchive 미설정 → 기존 시트 방식
+            _sheet_fallback_match(high_articles, statement_map)
 
         # 8. 텔레그램 발송
         logger.info("📤 Step 8: 텔레그램 발송")
