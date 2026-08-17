@@ -2,6 +2,7 @@
 issue_tracker.py 단위 테스트
 """
 
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 from src.collect import Article
 from src.issue_tracker import attach_issue_context
@@ -43,6 +44,9 @@ def test_attach_issue_context_matched():
 
 def test_attach_issue_context_gap_dates():
     """중간에 보도가 없었던 날짜 간격도 달력 기준 일수로 정확히 계산한다"""
+    # 오늘 기준 6일 전 = 7일째 (당일 포함)
+    six_days_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+
     storage = MagicMock()
     storage.get_recent_articles.return_value = [
         {
@@ -50,7 +54,7 @@ def test_attach_issue_context_gap_dates():
             "url": "https://example.com/gap",
             "title": "거제 조선소 산재 이슈",
             "source": "도민일보",
-            "briefing_date": "2026-08-07",  # 오늘(8/13) 기준 7일째
+            "briefing_date": six_days_ago,
         }
     ]
 
