@@ -104,3 +104,112 @@ def test_경남신문_기사_링크_파싱():
     assert articles[0]["url"] == (
         "https://www.knnews.co.kr/news/articleView.php?idxno=1548870"
     )
+
+
+def test_양산시청_보도자료_파싱_및_부서필터():
+    """양산시청 보도자료 목록에서 시청 부서 글은 수집하고, 읍면동 단순 미담은 제외한다."""
+    html = """
+    <table>
+        <tr>
+            <td>24185</td>
+            <td><a href="#" data-action="/portal/saeol/news/view.do" data-keyset="{'newsEpctNo': '28169'}">하북면, 착한나눔가게 53호점 협약식</a></td>
+            <td>하북면</td>
+            <td>2026-08-19</td>
+        </tr>
+        <tr>
+            <td>24184</td>
+            <td><a href="#" data-action="/portal/saeol/news/view.do" data-keyset="{'newsEpctNo': '28168'}">양산시, 2026년 첨단 스마트도시 사업 추진 계획 발표</a></td>
+            <td>미래산업과</td>
+            <td>2026-08-19</td>
+        </tr>
+        <tr>
+            <td>24183</td>
+            <td><a href="#" data-action="/portal/saeol/news/view.do" data-keyset="{'newsEpctNo': '28167'}">물금읍, 주민참여예산 조례 관련 주민설명회 개최</a></td>
+            <td>물금읍</td>
+            <td>2026-08-19</td>
+        </tr>
+    </table>
+    """
+    config = {"name": "양산시청", "base_url": "https://www.yangsan.go.kr"}
+    articles = _extract_links_from_html(html, config)
+
+    titles = [a["title"] for a in articles]
+    # 읍면동 단순 나눔은 제외
+    assert "하북면, 착한나눔가게 53호점 협약식" not in titles
+    # 시청 부서의 정책 발표는 포함
+    assert "양산시, 2026년 첨단 스마트도시 사업 추진 계획 발표" in titles
+    # 읍면동이라도 조례/설명회 등 중요 정책 키워드가 있으면 포함
+    assert "물금읍, 주민참여예산 조례 관련 주민설명회 개최" in titles
+
+    assert len(articles) == 2
+    assert articles[0]["url"] == "https://www.yangsan.go.kr/portal/saeol/news/view.do?newsEpctNo=28168&mid=0105010000"
+    assert articles[0]["published_at"] == datetime(2026, 8, 19)
+    assert "[미래산업과]" in articles[0]["summary"]
+
+
+def test_창원시청_보도자료_파싱():
+    """창원시청 보도자료 목록에서 제목, 요약문, 부서, 날짜와 언이스케이프된 URL을 정확히 추출한다."""
+    html = """
+    <ul>
+        <li class="li1">
+            <div class="wrap1">
+                <a href="?gcode=1011&amp;idx=882795&amp;amode=view&amp;" class="a1">
+                    <span class="wrap1texts">
+                        <strong class="t1">창원특례시, 시내버스 ‘준공영제 2.0’ 시대 연다<i class="ic1 new"><span class="t1">새 글</span></i></strong>
+                        <span class="t2">창원특례시는 시내버스 준공영제 갱신 협약을 체결했다.</span>
+                        <i class="wrap1t3">
+                            <span class="t3">2026-08-19</span>
+                            <span class="t3">버스운영과</span>
+                            <span class="t3">조회수 : 37</span>
+                        </i>
+                    </span>
+                </a>
+            </div>
+        </li>
+    </ul>
+    """
+    config = {
+        "name": "창원시청",
+        "url": "https://www.changwon.go.kr/cwportal/10310/10429/10432.web",
+        "base_url": "https://www.changwon.go.kr",
+    }
+    articles = _extract_links_from_html(html, config)
+
+    assert len(articles) == 1
+    assert articles[0]["title"] == "창원특례시, 시내버스 ‘준공영제 2.0’ 시대 연다"
+    # &amp;가 &로 언이스케이프되고 목록 URL 경로가 유지되어야 함
+    assert articles[0]["url"] == "https://www.changwon.go.kr/cwportal/10310/10429/10432.web?gcode=1011&idx=882795&amode=view&"
+    assert articles[0]["published_at"] == datetime(2026, 8, 19)
+    assert "[버스운영과]" in articles[0]["summary"]
+    assert "창원특례시는 시내버스" in articles[0]["summary"]
+
+
+def test_경남교육청_보도자료_파싱():
+    """경남교육청 보도자료 목록에서 제목, 요약문, 날짜, URL을 정확히 추출한다."""
+    html = """
+    <ul>
+        <li>
+            <a href="BD_selectBbs.do?q_bbsSn=1350&amp;q_bbsDocNo=20260819111426335">
+                <div class="cont">
+                    <p class="tit">가짜 뉴스, 사이버 폭력 스스로 거른다</p>
+                    <div class="comn">경상남도교육청은 디지털 미디어 문해교육을 운영한다고 밝혔다.</div>
+                    <div class="info">
+                        <p class="date">2026-08-19</p>
+                    </div>
+                </div>
+            </a>
+        </li>
+    </ul>
+    """
+    config = {
+        "name": "경남교육청",
+        "url": "https://www.gne.go.kr/pr/user/bbs/BD_selectBbsList.do?q_bbsSn=1350",
+        "base_url": "https://www.gne.go.kr",
+    }
+    articles = _extract_links_from_html(html, config)
+
+    assert len(articles) == 1
+    assert articles[0]["title"] == "가짜 뉴스, 사이버 폭력 스스로 거른다"
+    assert articles[0]["url"] == "https://www.gne.go.kr/pr/user/bbs/BD_selectBbs.do?q_bbsSn=1350&q_bbsDocNo=20260819111426335"
+    assert articles[0]["published_at"] == datetime(2026, 8, 19)
+    assert "디지털 미디어 문해교육" in articles[0]["summary"]

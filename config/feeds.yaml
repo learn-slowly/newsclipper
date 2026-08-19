@@ -11,6 +11,12 @@ regional:
     url: https://cdn.gnnews.co.kr/rss/gn_rss_allArticle.xml
     scope: gyeongnam
 
+# ── 지자체·공공기관 공식 보도자료 ──────────────────
+municipal:
+  - name: 경남도청
+    url: https://www.gyeongnam.go.kr/board/openApi/rss.gyeong?boardId=BBS_0000060&secretRss=0
+    scope: gyeongnam
+
 # ── 양산 지역지 (2026-08-19 추가 — 양산시 집중 프로토타입) ──────────────
 yangsan:
   - name: 양산신문

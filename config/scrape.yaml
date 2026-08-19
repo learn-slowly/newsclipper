@@ -78,3 +78,22 @@ sources:
     scope: gyeongnam
     base_url: http://m.ungsangnews.com
     timeout: 30
+
+  # ── 지자체·교육청 공식 보도자료 ──────────────────
+  - name: 양산시청
+    url: https://www.yangsan.go.kr/portal/saeol/news/list.do?mid=0105010000
+    scope: gyeongnam
+    base_url: https://www.yangsan.go.kr
+    timeout: 30
+
+  - name: 창원시청
+    url: https://www.changwon.go.kr/cwportal/10310/10429/10432.web
+    scope: gyeongnam
+    base_url: https://www.changwon.go.kr
+    timeout: 30
+
+  - name: 경남교육청
+    url: https://www.gne.go.kr/pr/user/bbs/BD_selectBbsList.do?q_bbsSn=1350
+    scope: gyeongnam
+    base_url: https://www.gne.go.kr
+    timeout: 30

@@ -242,6 +242,155 @@ def _extract_links_from_html(html_text: str, source_config: dict) -> list[dict]:
             if url not in seen_urls:
                 seen_urls.add(url)
                 articles.append({"title": title, "url": url})
+
+    elif name == "양산시청":
+        # 양산시청 보도자료/해명자료 목록: <a ... data-action="..." data-keyset="{'newsEpctNo': '...'}">
+        # 읍·면·동 주민센터 단순 미담/간식 나눔 건은 필터링하여 AI 비용 방어
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html_text, re.DOTALL)
+        for row in rows:
+            keyset_match = re.search(r"data-keyset=\"\{'newsEpctNo':\s*'(\d+)'\}\"", row)
+            if not keyset_match:
+                continue
+            news_no = keyset_match.group(1)
+
+            link_match = re.search(r'<a\s+[^>]*data-action="([^"]+)"[^>]*>(.*?)</a>', row, re.DOTALL)
+            if not link_match:
+                continue
+            action_path = link_match.group(1)
+            raw_title = link_match.group(2)
+            title = _clean_title(raw_title)
+            if not title or len(title) < 5:
+                continue
+
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+            dept = ""
+            date_str = ""
+            if len(tds) >= 4:
+                dept = _clean_title(tds[2])
+                date_str = _clean_title(tds[3])
+
+            # 부서 필터: 읍·면·동 단위 단순 미담/간식/생일/성금/나눔 등 제외
+            if re.search(r'(동|읍|면|주민센터|행정복지센터)$', dept):
+                if re.search(r'(나눔|기탁|간식|생일|후원|어르신|경로당|이웃돕기|봉사|전달)', title):
+                    continue
+                if not re.search(r'(조례|예산|대책|설명회|공청회|청사|주민자치회|투표|선거)', title):
+                    continue
+            pub_date = None
+            date_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
+            if date_match:
+                try:
+                    pub_date = datetime(
+                        int(date_match.group(1)),
+                        int(date_match.group(2)),
+                        int(date_match.group(3)),
+                    )
+                except ValueError:
+                    pub_date = None
+
+            url = f"https://www.yangsan.go.kr{action_path}?newsEpctNo={news_no}&mid=0105010000"
+            if url not in seen_urls:
+                seen_urls.add(url)
+                articles.append({
+                    "title": title,
+                    "url": url,
+                    "published_at": pub_date,
+                    "summary": f"[{dept}] {title}" if dept else title,
+                })
+
+    elif name == "창원시청":
+        # 창원시청 보도자료 목록: <li class="li1">...<strong class="t1">제목</strong><span class="t2">요약</span>
+        items = re.findall(r'<li\s+class="li1"[^>]*>(.*?)</li>', html_text, re.DOTALL)
+        for item in items:
+            link_match = re.search(r'<a\s+[^>]*href="([^"]+)"[^>]*>', item)
+            if not link_match:
+                continue
+            href = link_match.group(1)
+
+            title_match = re.search(r'<strong\s+class="t1"[^>]*>(.*?)</strong>', item, re.DOTALL)
+            if not title_match:
+                continue
+            raw_title = title_match.group(1)
+            title = _clean_title(raw_title)
+            title = re.sub(r'새\s*글\s*$', '', title).strip()
+            if not title or len(title) < 5:
+                continue
+
+            summary = ""
+            sum_match = re.search(r'<span\s+class="t2"[^>]*>(.*?)</span>', item, re.DOTALL)
+            if sum_match:
+                summary = _clean_title(sum_match.group(1))
+
+            pub_date = None
+            t3_list = re.findall(r'<span\s+class="t3"[^>]*>(.*?)</span>', item, re.DOTALL)
+            dept = ""
+            for t3_text in t3_list:
+                cleaned = _clean_title(t3_text)
+                date_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', cleaned)
+                if date_match and not pub_date:
+                    try:
+                        pub_date = datetime(
+                            int(date_match.group(1)),
+                            int(date_match.group(2)),
+                            int(date_match.group(3)),
+                        )
+                    except ValueError:
+                        pub_date = None
+                elif not date_match and not cleaned.startswith("조회수") and cleaned:
+                    dept = cleaned
+
+            clean_href = html.unescape(href)
+            # 상대경로가 ?gcode=... 형태이므로 목록 페이지 URL을 기준으로 합친다
+            page_url = source_config.get("url") or base_url
+            url = urljoin(page_url, clean_href)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                full_summary = f"[{dept}] {summary}" if dept and summary else (summary or title)
+                articles.append({
+                    "title": title,
+                    "url": url,
+                    "published_at": pub_date,
+                    "summary": full_summary,
+                })
+
+    elif name == "경남교육청":
+        # 경남교육홍보관 보도자료 목록: <p class="tit">제목</p><div class="comn">요약</div><p class="date">날짜</p>
+        items = re.findall(r'<li[^>]*>\s*<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>\s*</li>', html_text, re.DOTALL)
+        for href, inner in items:
+            tit_match = re.search(r'<p\s+class="tit"[^>]*>(.*?)</p>', inner, re.DOTALL)
+            if not tit_match:
+                continue
+            title = _clean_title(tit_match.group(1))
+            if not title or len(title) < 5:
+                continue
+
+            summary = ""
+            comn_match = re.search(r'<div\s+class="comn"[^>]*>(.*?)</div>', inner, re.DOTALL)
+            if comn_match:
+                summary = _clean_title(comn_match.group(1))
+
+            pub_date = None
+            date_match = re.search(r'<p\s+class="date"[^>]*>(\d{4})-(\d{1,2})-(\d{1,2})</p>', inner)
+            if date_match:
+                try:
+                    pub_date = datetime(
+                        int(date_match.group(1)),
+                        int(date_match.group(2)),
+                        int(date_match.group(3)),
+                    )
+                except ValueError:
+                    pub_date = None
+
+            clean_href = html.unescape(href)
+            page_url = source_config.get("url") or base_url
+            url = urljoin(page_url, clean_href)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                articles.append({
+                    "title": title,
+                    "url": url,
+                    "published_at": pub_date,
+                    "summary": summary or title,
+                })
     else:
         # 기본: href에서 링크 추출
         pattern = r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
@@ -315,6 +464,7 @@ def scrape_source(
                     title=raw["title"],
                     url=raw["url"],
                     source=name,
+                    summary=raw.get("summary", ""),
                     published_at=raw.get("published_at"),
                 )
                 if article.published_at and article.published_at < cutoff:
@@ -408,6 +558,11 @@ def enrich_articles_with_body(
     """
     for i, article in enumerate(articles):
         title_short = article.title[:30]
+
+        # 이미 목록에서 충분한 요약문이 추출된 경우 Jina 조회 생략 (창원시청, 경남교육청 등)
+        if article.summary and len(article.summary) >= MIN_CONTENT_LENGTH:
+            logger.debug(f"[Jina] 이미 요약문 있음 (Jina 생략): {title_short}")
+            continue
 
         # YouTube URL 스킵 (KBS경남 채널)
         if "youtube.com/watch" in article.url or "youtu.be/" in article.url:
