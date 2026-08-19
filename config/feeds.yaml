@@ -11,6 +11,15 @@ regional:
     url: https://cdn.gnnews.co.kr/rss/gn_rss_allArticle.xml
     scope: gyeongnam
 
+# ── 양산 지역지 (2026-08-19 추가 — 양산시 집중 프로토타입) ──────────────
+yangsan:
+  - name: 양산신문
+    url: http://www.yangsanilbo.com/rss/allArticle.xml
+    scope: gyeongnam
+  - name: 양산뉴스파크
+    url: http://www.ysnewspark.com/rss/allArticle.xml
+    scope: gyeongnam
+
 # ── 노동 전문 매체 ──────────────────────────────
 labor:
   - name: 매일노동뉴스

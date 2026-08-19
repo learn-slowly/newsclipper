@@ -62,3 +62,11 @@
 - weekly_summary.py: 지난 7일 기사 분석 및 Sonnet 4.6 기반 월요일 주간 리포트 생성 기능 추가
 - Workflows: .github/workflows/alert-check.yml (3시간 간격) 및 weekly-summary.yml (월요일 8시 KST) 생성
 - 테스트: 총 46개 테스트 통과 (새 기능 단위 테스트 6개 추가)
+
+## 2026-08-19 — 양산시 집중 프로토타입 (수집 보강 + 전용 섹션)
+
+- feeds.yaml: 양산 지역지 그룹 추가 — 양산신문·양산뉴스파크 RSS (실측: 24시간 내 50건/2건 수집 확인)
+- keywords.yaml: regions에 양산 세부 지명(물금·웅상·덕계·평산·서창·사송), regional_politics에 양산시의회·양산시장·양산시청·웅상출장소, prefilter_keywords에 양산 키워드 추가
+- classify.txt: 양산 관련 기사 판정 지침 추가 (지명/기관명 포함 시 scope=gyeongnam)
+- section_builder.py: 섹션 10 "📍 양산시 집중 소식" 신설 — is_yangsan_article() 하나로 편입/제외 판정 (중복·누락 방지), _matches_section에 섹션 번호 전달
+- 테스트: 양산 전용 섹션 5개 추가 (배치·제외·누락 없음·지명 판정·가산 후 배치), 총 59개 통과

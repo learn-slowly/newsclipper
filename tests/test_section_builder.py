@@ -6,7 +6,12 @@
 """
 
 from src.collect import Article
-from src.section_builder import PHASE1_ACTIVE, build_sections
+from src.section_builder import (
+    PHASE1_ACTIVE,
+    YANGSAN_SECTION_NUMBER,
+    build_sections,
+    is_yangsan_article,
+)
 
 
 def _article(title: str, category: str, importance: int, scope: str = "national") -> Article:
@@ -15,6 +20,96 @@ def _article(title: str, category: str, importance: int, scope: str = "national"
     a.importance = importance
     a.scope = scope
     return a
+
+
+def test_양산_기사는_양산_섹션으로만_배치():
+    """양산 키워드 기사는 전용 섹션(10)에만 들어가고 다른 섹션에는 중복 배치되지 않는다.
+
+    - 지역 정치 기사(양산시의회): 양산 섹션으로
+    - 노동 카테고리지만 본문에 '양산'이 있는 기사: 양산 섹션으로 (노동 섹션 제외)
+    - 정의당 전국 기사지만 '양산'이 언급된 기사: 양산 섹션으로 (정의당 섹션 제외)
+    """
+    articles = [
+        _article("양산시의회, 예산안 심의", "regional_politics", 4, "gyeongnam"),
+        _article("양산 공장 노동자 파업", "labor", 4, "gyeongnam"),
+        _article("정의당, 양산 지역 후보 발표", "justice_party", 4, "national"),
+    ]
+
+    sections = build_sections(articles)
+    names = [s.name for s in sections]
+
+    # 노동·정의당·경남정치 섹션에는 양산 기사가 없다
+    assert "노동·파업·산재" not in names
+    assert "정의당 — 전국" not in names
+    assert "경남 지역 정치·선거" not in names
+
+    # 양산 전용 섹션에만 모든 양산 기사가 모인다
+    yangsan = next(s for s in sections if s.number == YANGSAN_SECTION_NUMBER)
+    assert set(a.title for a in yangsan.articles) == {
+        "양산시의회, 예산안 심의",
+        "양산 공장 노동자 파업",
+        "정의당, 양산 지역 후보 발표",
+    }
+
+
+def test_양산이_아닌_기사는_양산_섹션에_안_들어감():
+    """양산 키워드가 없는 경남 기사는 기존 섹션(6)에 그대로 배치된다."""
+    articles = [
+        _article("창원시의회, 예산안 심의", "regional_politics", 4, "gyeongnam"),
+    ]
+
+    sections = build_sections(articles)
+    names = [s.name for s in sections]
+
+    assert "경남 지역 정치·선거" in names
+    assert not any(s.number == YANGSAN_SECTION_NUMBER for s in sections)
+
+
+def test_양산_배치_후_기사_누락_없음():
+    """입력 기사 수 == 전체 섹션에 배치된 기사 수 (캡 적용 전).
+
+    양산 기사가 1~9에서 제외되고 10에 편입되는 규칙이 같은 술어(is_yangsan_article)로
+    짝을 이루므로, 어느 기사도 어디에도 배치되지 않고 조용히 사라지지 않는다.
+    """
+    articles = [
+        _article("양산시의회, 예산안 심의", "regional_politics", 4, "gyeongnam"),
+        _article("창원 노동 기사", "labor", 4, "gyeongnam"),
+        _article("부산 기후 기사", "climate", 4, "gyeongnam"),
+        _article("정의당 전국 소식", "justice_party", 4, "national"),
+    ]
+
+    sections = build_sections(articles, max_items=None)
+    배치된_기사 = [a for s in sections for a in s.articles]
+
+    assert len(배치된_기사) == len(articles)
+    assert len(set(a.url for a in 배치된_기사)) == len(articles)  # 중복 없음
+
+
+def test_양산_세부_지명_판정():
+    """물금·웅상·덕계 등 양산 세부 지명도 양산 기사로 판정된다."""
+    for kw in ["물금", "웅상", "덕계", "평산", "사송", "양산시장", "웅상출장소"]:
+        a = _article(f"{kw} 관련 소식", "regional_politics", 4, "gyeongnam")
+        assert is_yangsan_article(a), f"{kw} 기사가 양산으로 판정되지 않음"
+
+
+def test_양산_기사_가산_후_전용_섹션_배치():
+    """키워드 가산(+1점)으로 발송 기준(4점)을 넘은 양산 기사가 섹션 10으로 배치된다.
+
+    지역명(물금) × 카테고리 키워드(노동) 교차 매칭으로 3점 → 4점이 되어
+    발송 대상에 오르고, 양산 전용 섹션으로 모인다.
+    """
+    from src.keyword_boost import apply_keyword_boost
+
+    a = _article("물금 지역 공장 노동자 파업", "labor", 3, "national")
+    apply_keyword_boost([a])
+
+    assert a.importance == 4, "교차 매칭 가산 후 4점이어야 함"
+    sections = build_sections([a], min_importance=4)
+    names = [s.name for s in sections]
+
+    assert "노동·파업·산재" not in names, "양산 노동 기사는 노동 섹션에 중복 배치 금지"
+    yangsan = next(s for s in sections if s.number == YANGSAN_SECTION_NUMBER)
+    assert yangsan.articles[0].title == "물금 지역 공장 노동자 파업"
 
 
 def test_중요도_기준_미달_기사는_섹션에서_제외():

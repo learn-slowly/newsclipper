@@ -1,9 +1,10 @@
 """
 섹션 구성 모듈
 
-분류된 기사를 9개 섹션으로 조직한다.
+분류된 기사를 10개 섹션으로 조직한다.
 같은 사건을 다룬 여러 언론사 기사는 하나의 묶음으로 합쳐서 보여준다.
 Phase 1에서는 6개 섹션 활성화 (노동, 기후, 경남정치, 정의당경남, 정의당전국, 연대정당).
+2026-08-19: 양산시 집중 섹션(10) 추가 — 양산 관련 기사는 이 섹션으로 모인다.
 """
 
 from dataclasses import dataclass, field
@@ -44,8 +45,9 @@ class Section:
     groups: list[ArticleGroup] = field(default_factory=list)
 
 
-# ── 9개 섹션 정의 ────────────────────────────
+# ── 10개 섹션 정의 ───────────────────────────
 # (번호, 이름, 이모지, 카테고리, 스코프 필터)
+# 섹션 10(양산)은 category/scope_filter를 무시하고 is_yangsan_article()만 본다.
 SECTION_DEFS = [
     (1, "노동·파업·산재", "💼", "labor", None),
     (2, "기후·환경", "🌱", "climate", None),
@@ -56,10 +58,31 @@ SECTION_DEFS = [
     (7, "정의당 — 경남", "🟡", "justice_party", "gyeongnam"),
     (8, "정의당 — 전국", "🟨", "justice_party", "national"),
     (9, "노동당·녹색당·진보당 동향", "🤝🌿", "allied_parties", None),
+    (10, "양산시 집중 소식", "📍", "regional_politics", "gyeongnam"),
+]
+
+# 양산 전용 섹션 번호
+YANGSAN_SECTION_NUMBER = 10
+
+# 양산 관련 판정 키워드 (제목/요약에 하나라도 포함되면 양산 기사로 판정)
+# 2026-08-19: 양산시 집중 프로토타입 — 세부 지명 + 시청·의회 등 기관명
+YANGSAN_KEYWORDS = [
+    "양산",
+    "물금",
+    "웅상",
+    "덕계",
+    "평산",
+    "서창",
+    "사송",
+    "양산시의회",
+    "양산시장",
+    "양산시청",
+    "웅상출장소",
 ]
 
 # Phase 1 활성화 섹션 번호 (2026-07-03: 연대정당 섹션 9 활성화)
-PHASE1_ACTIVE = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+# 2026-08-19: 양산시 집중 섹션 10 추가
+PHASE1_ACTIVE = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 # 발송 기준 중요도 기본값 (keywords.yaml의 min_importance로 재정의 가능)
 DEFAULT_MIN_IMPORTANCE = 4
@@ -74,12 +97,38 @@ DEFAULT_MIN_PER_SECTION = 3
 DEFAULT_MAX_PER_SECTION = 10
 
 
-def _matches_section(article: Article, category: str, scope_filter: str | None) -> bool:
+def is_yangsan_article(article: Article) -> bool:
+    """기사가 양산시 관련인지 판정 (제목/요약에 양산 키워드 포함 여부)
+
+    양산 기사는 전용 섹션(10)으로 모으기 때문에 다른 섹션에서 제외한다.
+    """
+    text = f"{article.title} {article.summary}"
+    return any(kw in text for kw in YANGSAN_KEYWORDS)
+
+
+def _matches_section(
+    article: Article,
+    category: str,
+    scope_filter: str | None,
+    section_number: int,
+) -> bool:
     """기사가 이 섹션에 들어가는 기사인지 판정 (카테고리 + 지역 범위)
 
     섹션 배치 규칙은 이 함수 한 곳에만 둔다.
     build_sections가 섹션마다 이 규칙으로 기사를 고른다.
+
+    2026-08-19: 양산 기사는 양산 전용 섹션(10)에서만 다룬다.
+    - 섹션 10은 카테고리·스코프 무관하게 is_yangsan_article()만 본다 (캐치올).
+    - 나머지 섹션은 is_yangsan_article()이면 제외한다.
+    같은 술어 하나로 편입/제외를 판정하므로 기사가 어디에도 배치되지 않고
+    사라지는 구멍이 없다.
     """
+    # 양산 기사 → 양산 섹션(10)으로만 (나머지 섹션에서는 제외)
+    if is_yangsan_article(article):
+        return section_number == YANGSAN_SECTION_NUMBER
+    # 양산이 아닌 기사는 양산 섹션(10)에 안 들어감
+    if section_number == YANGSAN_SECTION_NUMBER:
+        return False
     if article.category != category:
         return False
     if scope_filter == "gyeongnam":
@@ -119,7 +168,7 @@ def build_sections(
     Returns:
         기사가 있는 섹션만 반환 (빈 섹션은 생략)
     """
-    active = active_sections if active_sections is not None else set(range(1, 10))
+    active = active_sections if active_sections is not None else set(range(1, 11))
 
     # 1. 발송 기준 미달 기사 제외
     articles = [a for a in articles if a.importance >= min_importance]
@@ -131,7 +180,10 @@ def build_sections(
         if number not in active:
             continue
 
-        matched = [a for a in articles if _matches_section(a, category, scope_filter)]
+        matched = [
+            a for a in articles
+            if _matches_section(a, category, scope_filter, number)
+        ]
         if not matched:
             continue
 
