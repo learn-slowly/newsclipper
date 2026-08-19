@@ -2,7 +2,6 @@
 # RSS가 없는 경남 지역 매체를 스크래핑으로 수집한다
 
 sources:
-  # 경남신문: 기사 목록이 JS(AJAX)로 로딩 — 일반 스크래핑 불가. 추후 Playwright 검토
   # 프레시안: RSS 폐기(2026-08 확인) → 섹션 페이지 스크래핑으로 전환.
   # 기사 URL 패턴: /pages/articles/{id}
   - name: 프레시안
@@ -63,3 +62,19 @@ sources:
     url: https://www.youtube.com/@kbsnews_gyeongnam/videos
     scope: gyeongnam
     # 유튜브 채널 페이지에서 영상 제목·URL 스크래핑 (RSS 차단, 봇 차단 우회)
+
+  # 경남신문: RSS 없음. 2026-08-19 재확인 — 홈페이지(/)는 일반 HTML로 기사 링크 노출 (JS 로딩 아님)
+  # 기사 URL 패턴: /news/articleView.php?idxno={id}
+  - name: 경남신문
+    url: https://www.knnews.co.kr
+    scope: gyeongnam
+    base_url: https://www.knnews.co.kr
+    timeout: 30
+
+  # 웅상신문(양산웅상신문, 2026-08-15 제호 변경): RSS 없음 — 모바일 목록 페이지 스크래핑
+  # 기사 URL 패턴: view.php?idx={id}
+  - name: 양산웅상신문
+    url: http://m.ungsangnews.com/list.php?part_idx=291
+    scope: gyeongnam
+    base_url: http://m.ungsangnews.com
+    timeout: 30

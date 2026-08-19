@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
@@ -42,6 +43,10 @@ MBC_ID_RE = re.compile(r"NewsViewFunc\((\d+)\)")
 DEFAULT_SCRAPE_TIMEOUT = 15
 # 타임아웃 시 재시도 횟수 (느린 서버가 한 번에 응답 못 하는 경우 대비)
 SCRAPE_MAX_ATTEMPTS = 2
+
+# 목록에 날짜가 있는 스크래핑 매체(웅상신문)에서 몇 시간 이내 기사만 남길지.
+# 24시간으로 두면 하루 2회 실행 시 아침 수집분이 저녁에 다시 실릴 수 있어 48시간으로 넉넉히 잡는다.
+SCRAPE_RECENCY_HOURS = 48
 
 # ── Jina Reader 본문 추출 설정 ─────────────────────
 # 스크래핑 매체(MBC경남·KNN·경남신문 등)는 RSS와 달리 본문이 비어 있으므로
@@ -146,6 +151,47 @@ def _extract_links_from_html(html_text: str, source_config: dict) -> list[dict]:
             if url not in seen_urls:
                 seen_urls.add(url)
                 articles.append({"title": title, "url": url})
+
+    elif name == "양산웅상신문":
+        # 웅상신문(2026-08-15 제호 변경: 양산웅상신문) 모바일 목록
+        # <a href="view.php?idx=43566"> 블록 안에
+        #   <span class="news_tit">제목</span>
+        #   <span class="news_modify">2025/06/08 12:37</span>
+        # 목록이 오래된 순(2022~2023년 기사가 위)이라 날짜로 걸러낸다.
+        # 블록 단위로 자른 뒤 각 블록 안에서만 파싱 — news_modify가 없는
+        # 기사가 다음 기사의 날짜를 끌어오지 않게 한다.
+        blocks = re.split(r'(?=<a\s[^>]*href="view\.php\?idx=)', html_text)
+        for block in blocks:
+            link = re.search(r'href="(view\.php\?idx=\d+)"', block)
+            if not link:
+                continue
+            path = link.group(1)
+            tit = re.search(
+                r'<span class="news_tit">(.*?)</span>', block, re.DOTALL
+            )
+            if not tit:
+                continue
+            title = _clean_title(tit.group(1))
+            if not title or len(title) < 5:
+                continue
+            pub_date = None
+            mod = re.search(
+                r'<span class="news_modify">'
+                r'(\d{4})/(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})</span>',
+                block,
+            )
+            if mod:
+                try:
+                    pub_date = datetime(
+                        int(mod.group(1)), int(mod.group(2)), int(mod.group(3)),
+                        int(mod.group(4)), int(mod.group(5)),
+                    )
+                except ValueError:
+                    pub_date = None
+            url = urljoin(base_url, path)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                articles.append({"title": title, "url": url, "published_at": pub_date})
 
     elif name == "KBS경남":
         # 유튜브 채널 페이지에서 ytInitialData JSON으로 영상 제목·URL 추출
@@ -260,13 +306,19 @@ def scrape_source(
 
             raw_articles = _extract_links_from_html(html, source_config)
 
+            # 목록에 날짜가 있는 매체(웅상신문)의 오래된 기사 걸러내기
+            cutoff = datetime.now() - timedelta(hours=SCRAPE_RECENCY_HOURS)
+
             articles = []
             for raw in raw_articles:
                 article = Article(
                     title=raw["title"],
                     url=raw["url"],
                     source=name,
+                    published_at=raw.get("published_at"),
                 )
+                if article.published_at and article.published_at < cutoff:
+                    continue
                 articles.append(article)
 
             logger.info(f"[{name}] 스크래핑 {len(articles)}건 수집")
