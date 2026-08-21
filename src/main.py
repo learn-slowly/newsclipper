@@ -96,13 +96,13 @@ def calculate_cost(
 
 
 def is_urgent_article(article: Article, urgent_keywords: list[str]) -> bool:
-    """속보 대상 기사인지 판정 (중요도 5점 OR 중요도 4점 이상 + 속보 긴급 키워드 포함)"""
-    if article.importance == 5:
-        return True
-    if article.importance >= 4 and urgent_keywords:
-        text = f"{article.title} {article.summary}"
-        return any(kw in text for kw in urgent_keywords)
-    return False
+    """속보 대상 기사인지 판정 (중요도 4점 이상 + 속보 긴급 키워드 필수 포함)"""
+    if article.importance < 4:
+        return False
+    if not urgent_keywords:
+        return False
+    text = f"{article.title} {article.summary}"
+    return any(kw in text for kw in urgent_keywords)
 
 
 # ── 분류 전멸 감지 ────────────────────────────────
@@ -522,6 +522,7 @@ async def run_alert_pipeline():
                 storage.mark_alert_processed(
                     a.url_hash, a.url, a.title, a.importance, sent_alert=True
                 )
+                storage.mark_seen(a.url_hash, a.url, a.title)
             cost = calculate_cost(classify_in, classify_out, 0, 0)
             today = datetime.now().strftime("%Y-%m-%d")
             storage.save_briefing(
