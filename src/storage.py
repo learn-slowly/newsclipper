@@ -17,6 +17,12 @@ from loguru import logger
 # 기본 DB 경로
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "state" / "seen.db"
 
+# 보존 정책 (state/seen.db는 매 실행마다 git에 커밋되므로 크기를 관리해야 한다)
+# GitHub은 파일 하나가 100MB를 넘으면 push를 거부하므로, 한참 아래에서 상한을 잡는다.
+DEFAULT_ARTICLE_RETENTION_DAYS = 45   # articles: 이슈 추적(7일)·주간 요약(7일)에 충분한 여유
+DEFAULT_SEEN_RETENTION_DAYS = 30      # seen/alert_seen: 중복 체크는 최근 7일만 조회
+DEFAULT_MAX_DB_SIZE_MB = 50.0         # 이 크기를 넘으면 오래된 기사부터 추가 삭제
+
 
 class Storage:
     """SQLite 기반 저장소 관리"""
@@ -276,6 +282,124 @@ class Storage:
 
         if deleted_seen > 0 or deleted_alert > 0:
             logger.info(f"오래된 기록 정리 완료 (seen {deleted_seen}건, alert_seen {deleted_alert}건 삭제)")
+
+    def prune(
+        self,
+        article_days: int = DEFAULT_ARTICLE_RETENTION_DAYS,
+        seen_days: int = DEFAULT_SEEN_RETENTION_DAYS,
+        max_db_size_mb: float = DEFAULT_MAX_DB_SIZE_MB,
+    ) -> dict:
+        """보존 기간이 지난 레코드를 삭제하고, DB 파일을 상한 크기 아래로 유지한다.
+
+        state/seen.db는 모든 실행에서 git에 커밋되고, GitHub은 파일 하나가
+        100MB를 넘으면 push를 거부한다(2026-11 오류의 원인).
+        articles는 계속 쌓이기만 하고 VACUUM도 하지 않아 파일이 100MB까지
+        자랐으므로, 여기서
+
+        1. 보존 기간(기본 45일)이 지난 기사와 중복 기록(30일)을 지우고,
+        2. 남은 빈 페이지를 VACUUM으로 회수하며,
+        3. 그래도 max_db_size_mb를 넘으면 오래된 기사부터 추가로 지워
+           파일 크기가 항상 상한 아래에 있도록 보장한다.
+
+        Returns:
+            실행 결과 통계 dict (before/after 크기, 삭제 건수)
+        """
+        max_bytes = int(max_db_size_mb * 1024 * 1024)
+        before = self.db_path.stat().st_size if self.db_path.exists() else 0
+
+        deleted_articles = 0
+        deleted_seen = 0
+        deleted_alerts = 0
+        forced_deleted = 0
+
+        # VACUUM은 트랜잭션 밖에서 실행해야 하므로 autocommit 모드로 연결
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        try:
+            cursor = conn.cursor()
+            art_cutoff = (datetime.now() - timedelta(days=article_days)).strftime("%Y-%m-%d")
+            seen_cutoff = (datetime.now() - timedelta(days=seen_days)).isoformat()
+
+            cursor.execute("DELETE FROM articles WHERE briefing_date < ?", (art_cutoff,))
+            deleted_articles = cursor.rowcount if cursor.rowcount > 0 else 0
+            cursor.execute("DELETE FROM seen WHERE first_seen_at < ?", (seen_cutoff,))
+            deleted_seen = cursor.rowcount if cursor.rowcount > 0 else 0
+            cursor.execute("DELETE FROM alert_seen WHERE created_at < ?", (seen_cutoff,))
+            deleted_alerts = cursor.rowcount if cursor.rowcount > 0 else 0
+
+            # 지운 페이지가 있을 때만 파일을 다시 쓴다(불필요한 전체 재작성 방지)
+            freelist = cursor.execute("PRAGMA freelist_count").fetchone()[0]
+            if deleted_articles or deleted_seen or deleted_alerts or freelist:
+                cursor.execute("VACUUM")
+
+            size = self.db_path.stat().st_size
+
+            # 상한을 넘으면 오래된 기사부터 10%씩 추가 삭제 (안전망)
+            for _ in range(20):
+                if size <= max_bytes:
+                    break
+
+                total = cursor.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+                if total > 0:
+                    chunk = max(100, total // 10)
+                    cursor.execute(
+                        """DELETE FROM articles WHERE id IN (
+                               SELECT id FROM articles
+                               ORDER BY briefing_date, id
+                               LIMIT ?)""",
+                        (chunk,),
+                    )
+                else:
+                    total_seen = cursor.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
+                    if total_seen == 0:
+                        break
+                    chunk = max(100, total_seen // 10)
+                    cursor.execute(
+                        """DELETE FROM seen WHERE url_hash IN (
+                               SELECT url_hash FROM seen
+                               ORDER BY first_seen_at
+                               LIMIT ?)""",
+                        (chunk,),
+                    )
+
+                removed = cursor.rowcount if cursor.rowcount > 0 else 0
+                if removed == 0:
+                    break
+                forced_deleted += removed
+                cursor.execute("VACUUM")
+                size = self.db_path.stat().st_size
+        finally:
+            conn.close()
+
+        after = self.db_path.stat().st_size if self.db_path.exists() else 0
+        stats = {
+            "size_before_bytes": before,
+            "size_after_bytes": after,
+            "deleted_articles": deleted_articles,
+            "deleted_seen": deleted_seen,
+            "deleted_alerts": deleted_alerts,
+            "forced_deleted": forced_deleted,
+        }
+
+        forced_note = f", 상한 초과로 {forced_deleted}건 추가 삭제" if forced_deleted else ""
+        logger.info(
+            "DB 정리 완료: {:.2f}MB → {:.2f}MB (기사 {}건, seen {}건, alert_seen {}건 삭제{})".format(
+                before / 1024 / 1024,
+                after / 1024 / 1024,
+                deleted_articles,
+                deleted_seen,
+                deleted_alerts,
+                forced_note,
+            )
+        )
+
+        if after > max_bytes:
+            logger.warning(
+                "DB 크기가 상한({:.0f}MB)을 넘었습니다: {:.2f}MB".format(
+                    max_db_size_mb, after / 1024 / 1024
+                )
+            )
+
+        return stats
 
     def get_recent_articles(self, days: int = 7) -> list[dict]:
         """최근 N일간 저장된 기사 목록 반환 (이슈 추적 및 주간 요약용, 오늘 포함 N일)"""

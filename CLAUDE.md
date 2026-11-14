@@ -59,6 +59,17 @@
 - **연대당(노동당·녹색당)을 과소평가하지 않기**: 수집 기사가 적을 수 있으므로 오히려 포함되기 쉽게 조정
 - 10개 섹션 중 특정 섹션에만 기사가 몰리지 않도록 RSS 피드 분산 구성
 
+## DB 크기 관리 (중요)
+
+`state/seen.db`는 매 실행마다 git에 커밋되므로 **파일 하나가 100MB를 넘으면 GitHub이 push를 거부**한다
+(2026-11-02 이후 `Daily Briefing`·`Alert Check` 워크플로가 이 때문에 실패했다).
+
+- `Storage.prune()`이 보존 기간(기사 45일, 중복 기록 30일)이 지난 레코드를 지우고 VACUUM한다
+- 그래도 `DEFAULT_MAX_DB_SIZE_MB`(50MB)를 넘으면 오래된 기사부터 추가로 지워 상한 아래로 만든다
+- 세 파이프라인(briefing·alert·weekly)은 종료 시(`finally`) 항상 prune을 실행한다
+- 보존 기간·상한은 `src/storage.py`의 `DEFAULT_*` 상수에서 조정하고,
+  수동 정리는 `python scripts/prune_db.py`로 한다
+
 ## 프로젝트 구조
 
 ```

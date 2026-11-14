@@ -48,6 +48,19 @@ from src.jpnews_reader import read_statements, find_matching_statement
 from src.jarchive_client import find_best_match as jarchive_find_match, JarchiveUnavailable
 from src.issue_tracker import attach_issue_context
 from src.weekly_summary import generate_weekly_summary
+
+
+def prune_storage_safely(storage) -> None:
+    """DB 정리 실패가 파이프라인 결과를 가리지 않도록 감서서 실행
+
+    크기 관리 자체는 워크플로의 `scripts/prune_db.py` 단계에서도 보장한다.
+    """
+    try:
+        storage.prune()
+    except Exception as e:
+        logger.warning(f"DB 정리 실패(무시하고 계속): {e}")
+
+
 # ── 로거 설정 ─────────────────────────────────
 def setup_logger():
     """로거 초기화"""
@@ -407,14 +420,15 @@ async def run_pipeline():
             estimated_cost_usd=cost,
         )
 
-        # 오래된 레코드 정리
-        storage.cleanup_old_records(days=30)
-
     except Exception as e:
         logger.exception(f"파이프라인 오류: {e}")
         if admin_id and bot_token:
             await send_error_alert(f"파이프라인 오류: {e}", bot_token, admin_id)
         raise
+    finally:
+        # 오래된 레코드 정리 + DB 크기 관리 (git 100MB 제한 대비)
+        # 오류로 중단돼도 DB는 반드시 상한 아래로 정리해 둔다 (커밋 단계는 always())
+        prune_storage_safely(storage)
 
     logger.info("=" * 50)
     logger.info("✅ 브리핑 완료")
@@ -541,6 +555,9 @@ async def run_alert_pipeline():
         logger.exception(f"속보 파이프라인 오류: {e}")
         if admin_id and bot_token:
             await send_error_alert(f"속보 파이프라인 오류: {e}", bot_token, admin_id)
+    finally:
+        # 속보 모드만 실행되는 날에도 DB가 찌지 않도록 항상 정리
+        prune_storage_safely(storage)
 
 
 async def run_weekly_pipeline():
@@ -598,6 +615,8 @@ async def run_weekly_pipeline():
         logger.exception(f"주간 요약 파이프라인 오류: {e}")
         if admin_id and bot_token:
             await send_error_alert(f"주간 요약 파이프라인 오류: {e}", bot_token, admin_id)
+    finally:
+        prune_storage_safely(storage)
 
 
 def main():
